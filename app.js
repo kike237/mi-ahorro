@@ -9,18 +9,20 @@
 const STORE_KEY = 'mi-ahorro-v1';
 
 const CATS = [
-  ['comida', '🍽️', 'Comida'],
-  ['casa', '🏠', 'Casa / Renta'],
-  ['obra', '👷', 'Albañil / Obra'],
-  ['herramientas', '🧰', 'Servicios y herramientas de trabajo'],
-  ['telefono', '📱', 'Teléfono / Internet'],
-  ['deudas', '💳', 'Deudas'],
-  ['gustos', '🎉', 'Gustos'],
-  ['otro', '📦', 'Otro'],
+  ['comida', '🍽️', 'Comida', '#22c55e'],
+  ['casa', '🏠', 'Casa / Renta', '#f43f5e'],
+  ['obra', '👷', 'Albañil / Obra', '#f59e0b'],
+  ['herramientas', '🧰', 'Servicios y herramientas de trabajo', '#8b5cf6'],
+  ['telefono', '📱', 'Teléfono / Internet', '#3b82f6'],
+  ['deudas', '💳', 'Deudas', '#ef4444'],
+  ['gustos', '🎉', 'Gustos', '#ec4899'],
+  ['otro', '📦', 'Otro', '#64748b'],
 ];
+// Colores de las barras por mes (de izquierda a derecha, como un arcoíris)
+const BAR_COLORS = ['#3b82f6', '#06b6d4', '#22c55e', '#84cc16', '#eab308', '#f97316', '#ef4444', '#ec4899'];
 const MONTOS_RAPIDOS = [10, 20, 50, 100, 200];
 const CAPITAL_RAPIDO = [50, 100, 200, 500, 1000, 1200];
-const CAT = Object.fromEntries(CATS.map(([id, e, n]) => [id, { e, n }]));
+const CAT = Object.fromEntries(CATS.map(([id, e, n, c]) => [id, { e, n, c }]));
 
 const MONEDAS = [
   ['USD', 'Dólar'], ['VES', 'Bolívar'], ['MXN', 'Peso mexicano'], ['COP', 'Peso colombiano'], ['ARS', 'Peso argentino'],
@@ -127,7 +129,8 @@ function cargar() {
 }
 
 let S = cargar();
-let tab = ['quincena', 'ahorros', 'ajustes'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'quincena';
+const TABS = ['inicio', 'calc', 'ahorros', 'ajustes'];
+let tab = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'inicio';
 
 function guardar() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
@@ -237,94 +240,175 @@ async function actualizarBCV(forzar) {
     bcvError = true;
   }
   bcvCargando = false;
-  if (tab === 'quincena' && !$('#sheet').classList.contains('open')) render();
+  if ((tab === 'inicio' || tab === 'calc') && !$('#sheet').classList.contains('open')) render();
+}
+
+function fechaBCV(larga) {
+  if (!BCV || !BCV.fecha) return '';
+  const f = parse(BCV.fecha);
+  return larga ? `${DIAS[f.getDay()]} ${f.getDate()} de ${MESES[f.getMonth()]}` : `${DIAS[f.getDay()].slice(0, 3)} ${diaMes(f)}`;
 }
 
 function tarjetaBCV() {
   if (!BCV) {
-    return `<button class="card bcv" data-act="bcv">
-      <div class="bcv-h"><span>💱 Tasa BCV</span><span class="bcv-f">${bcvError ? 'Sin conexión' : 'Cargando…'}</span></div></button>`;
+    return `<button class="card bcv" data-tabgo="calc">
+      <span style="font-size:22px">💱</span>
+      <span class="bcv-t"><b>Tasa BCV</b>${bcvError ? 'Sin conexión' : 'Cargando…'}</span></button>`;
   }
-  const f = BCV.fecha ? parse(BCV.fecha) : null;
-  const fecha = f ? `${DIAS[f.getDay()].slice(0, 3)} ${diaMes(f)}` : '';
-  return `<button class="card bcv" data-act="bcv">
-    <div class="bcv-h"><span>💱 Tasa BCV</span><span class="bcv-f">${bcvError ? '⚠️ sin conexión · ' : ''}${fecha}</span></div>
-    <div class="bcv-row">
-      <div><span class="bcv-c">🇺🇸 USD</span><b>Bs. ${bs(BCV.usd)}</b></div>
-      <div><span class="bcv-c">🇪🇺 EUR</span><b>Bs. ${bs(BCV.eur)}</b></div>
-    </div></button>`;
+  return `<button class="card bcv" data-tabgo="calc">
+    <span style="font-size:22px">💱</span>
+    <span class="bcv-t"><b>Tasa BCV</b>${bcvError ? '⚠️ sin conexión' : fechaBCV(false)}</span>
+    <span class="bcv-v">
+      <div><span>USD</span><b>Bs. ${bs(BCV.usd)}</b></div>
+      <div><span>EUR</span><b>Bs. ${bs(BCV.eur)}</b></div>
+    </span>
+    <span class="chev">›</span></button>`;
 }
 
-function sheetBCV() {
-  if (!BCV) { actualizarBCV(true); toast(bcvError ? 'Sin conexión. Intenta de nuevo con internet.' : 'Buscando la tasa…'); return; }
-  let de = 'USD';
-  const f = BCV.fecha ? parse(BCV.fecha) : null;
-  openSheet(`
-    <h3>Tasa oficial BCV</h3>
-    <p class="hint">Fecha valor: ${f ? `${DIAS[f.getDay()]} ${f.getDate()} de ${MESES[f.getMonth()]}` : '—'}
-      · revisada ${new Date(BCV.obtenido).toLocaleString('es-VE', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</p>
-    <div class="summary">
-      <div class="sr"><span>🇺🇸 1 dólar</span><b>Bs. ${bs(BCV.usd)}</b></div>
-      <div class="sr"><span>🇪🇺 1 euro</span><b>Bs. ${bs(BCV.eur)}</b></div>
+/* ---- Calculadora ---- */
+const CALC = { div: 'USD', ext: '', ves: '', ultimo: 'ext' };
+const tasaDe = d => (BCV ? (d === 'USD' ? BCV.usd : BCV.eur) : 0);
+const simb = d => (d === 'USD' ? '$' : '€');
+const fmtIn = n => (n ? String(Math.round(n * 100) / 100) : '');
+
+function vistaCalc() {
+  const rates = BCV
+    ? `<div class="rates">
+        <div class="card"><div class="rk"><span class="dot" style="background:#22c55e"></span>Dólar BCV</div><div class="rv">Bs. ${bs(BCV.usd)}</div><div class="rf">por 1 USD</div></div>
+        <div class="card"><div class="rk"><span class="dot" style="background:#3b82f6"></span>Euro BCV</div><div class="rv">Bs. ${bs(BCV.eur)}</div><div class="rf">por 1 EUR</div></div>
+      </div>
+      <div class="soon" style="margin-top:8px">Fecha valor: ${fechaBCV(true)}${bcvError ? ' · ⚠️ sin conexión, última tasa guardada' : ''}</div>`
+    : `<div class="card"><div class="empty"><div class="e">📡</div>${bcvError ? 'No hay conexión para buscar la tasa.<br>Conéctate a internet e intenta de nuevo.' : 'Buscando la tasa del BCV…'}</div></div>`;
+
+  return `
+    <header class="top"><div><h1>Calculadora</h1><div class="sub">Bolívares ↔ dólares y euros, tasa oficial BCV</div></div></header>
+    ${rates}
+    <div class="card conv">
+      <div class="seg" id="cDiv" style="margin-bottom:14px">
+        <button data-d="USD">🇺🇸 Dólares</button><button data-d="EUR">🇪🇺 Euros</button>
+      </div>
+      <div class="cf"><div class="cl"><span>${CALC.div === 'USD' ? 'Dólares' : 'Euros'}</span><span>${CALC.div}</span></div>
+        <div class="ci"><span>${simb(CALC.div)}</span><input id="cExt" inputmode="decimal" autocomplete="off" placeholder="0" value="${CALC.ext}"></div></div>
+      <div class="swap" aria-hidden="true">⇅</div>
+      <div class="cf"><div class="cl"><span>Bolívares</span><span>VES</span></div>
+        <div class="ci"><span>Bs.</span><input id="cVes" inputmode="decimal" autocomplete="off" placeholder="0" value="${CALC.ves}"></div></div>
+      <div class="chips" style="margin-top:14px">${[1, 5, 10, 20, 50, 100].map(m => `<button class="chip" data-q="${m}">${simb(CALC.div)}${m}</button>`).join('')}<button class="chip" id="cClr">Borrar</button></div>
     </div>
-    <div class="field"><label>Convertir</label>
-      <div class="seg" id="cvDe"><button data-d="USD">Dólares</button><button data-d="EUR">Euros</button><button data-d="VES">Bolívares</button></div></div>
-    <div class="field"><div class="money"><span class="cur" id="cvCur">$</span>
-      <input class="input" id="cvIn" inputmode="decimal" autocomplete="off" placeholder="0"></div></div>
-    <div class="summary" id="cvOut" style="margin-top:12px"></div>
-    <button class="btn soft mt" id="cvRef">🔄 Actualizar tasa</button>`,
-    b => {
-      const inp = $('#cvIn', b);
-      const upd = () => {
-        const v = num(inp.value);
-        b.querySelectorAll('#cvDe button').forEach(x => x.classList.toggle('on', x.dataset.d === de));
-        $('#cvCur', b).textContent = de === 'USD' ? '$' : de === 'EUR' ? '€' : 'Bs.';
-        const enBs = de === 'VES' ? v : v * (de === 'USD' ? BCV.usd : BCV.eur);
-        $('#cvOut', b).innerHTML = [
-          de !== 'VES' ? `<div class="sr"><span>En bolívares</span><b>Bs. ${bs(enBs)}</b></div>` : '',
-          de !== 'USD' ? `<div class="sr"><span>En dólares</span><b>$ ${bs(enBs / BCV.usd)}</b></div>` : '',
-          de !== 'EUR' ? `<div class="sr"><span>En euros</span><b>€ ${bs(enBs / BCV.eur)}</b></div>` : '',
-        ].join('');
-      };
-      b.querySelectorAll('#cvDe button').forEach(x => x.onclick = () => { de = x.dataset.d; upd(); inp.focus(); });
-      inp.oninput = upd;
-      upd();
-      $('#cvRef', b).onclick = async () => {
-        $('#cvRef', b).textContent = 'Actualizando…';
-        await actualizarBCV(true);
-        closeSheet();
-        toast(bcvError ? 'Sin conexión, se muestra la última tasa' : 'Tasa actualizada ✅');
-      };
-    });
+    <button class="btn soft mt" data-act="bcvRefrescar">🔄 Actualizar tasa</button>
+    <div class="soon">💡 Pronto: precio del USDT</div>
+  `;
+}
+
+function montarCalc() {
+  const v = $('#view');
+  const ext = $('#cExt', v), ves = $('#cVes', v);
+  if (!ext) return;
+  v.querySelectorAll('#cDiv button').forEach(b => b.classList.toggle('on', b.dataset.d === CALC.div));
+  const desdeExt = () => { CALC.ext = ext.value; CALC.ultimo = 'ext'; CALC.ves = BCV ? fmtIn(num(ext.value) * tasaDe(CALC.div)) : ''; ves.value = CALC.ves; };
+  const desdeVes = () => { CALC.ves = ves.value; CALC.ultimo = 'ves'; CALC.ext = BCV ? fmtIn(num(ves.value) / tasaDe(CALC.div)) : ''; ext.value = CALC.ext; };
+  ext.oninput = desdeExt;
+  ves.oninput = desdeVes;
+  v.querySelectorAll('#cDiv button').forEach(b => b.onclick = () => {
+    CALC.div = b.dataset.d;
+    // recalcula a partir del último campo que escribiste
+    if (CALC.ultimo === 'ves') { CALC.ext = BCV ? fmtIn(num(CALC.ves) / tasaDe(CALC.div)) : ''; }
+    else { CALC.ves = BCV ? fmtIn(num(CALC.ext) * tasaDe(CALC.div)) : ''; }
+    render();
+  });
+  v.querySelectorAll('[data-q]').forEach(c => c.onclick = () => { ext.value = c.dataset.q; desdeExt(); });
+  $('#cClr', v).onclick = () => { CALC.ext = CALC.ves = ''; ext.value = ves.value = ''; ext.focus(); };
 }
 
 /* ---------------- Vistas ---------------- */
 
-function donut(c) {
-  const segs = [
-    [c.ahorro, '#ffffff'],
-    [c.gastos, '#fcd34d'],
-    [Math.max(c.libre, 0), 'rgba(255,255,255,.35)'],
-  ];
-  const total = Math.max(c.ingreso, c.ahorro + c.gastos);
-  const R = 42, C = 2 * Math.PI * R;
-  let off = 0, arcs = '';
-  if (total > 0) {
-    for (const [v, col] of segs) {
-      if (v <= 0) continue;
-      const len = (v / total) * C;
-      arcs += `<circle r="${R}" cx="60" cy="60" fill="none" stroke="${col}" stroke-width="14"
-        stroke-dasharray="${Math.max(len - 1.5, 0.5)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`;
-      off += len;
-    }
+// Mes al que pertenece una quincena: el mes en que se termina de gastar ese dinero
+function mesDeQuincena(cobroIso, inicioIso) {
+  const d = cobroIso ? cobroDespues(parse(cobroIso)) : parse(inicioIso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+
+function graficaMensual(q, c) {
+  const tot = {};
+  for (const h of S.historial) {
+    const k = mesDeQuincena(h.cobro, h.inicio);
+    tot[k] = (tot[k] || 0) + (h.gastos || 0);
   }
-  const pct = c.ingreso > 0 ? Math.round((c.ahorro / c.ingreso) * 100) : 0;
-  return `<svg class="donut" viewBox="0 0 120 120" aria-hidden="true">
-    <circle r="${R}" cx="60" cy="60" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="14"/>
-    ${arcs}
-    <text x="60" y="56" text-anchor="middle" class="center-t">ahorras</text>
-    <text x="60" y="74" text-anchor="middle" class="center-v">${pct}%</text>
+  const kAct = mesDeQuincena(q.cobro, q.inicio);
+  tot[kAct] = (tot[kAct] || 0) + c.gastos;
+
+  const [y, m] = kAct.split('-').map(Number);
+  const meses = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(y, m - 1 - i, 1);
+    const k = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+    meses.push({ k, lbl: MESES[d.getMonth()].slice(0, 3), v: tot[k] || 0 });
+  }
+  const max = Math.max(...meses.map(x => x.v), 1);
+  const bars = meses.map((x, i) => {
+    const cur = x.k === kAct;
+    const h = Math.max(4, Math.round((x.v / max) * 100));
+    return `<div class="b ${cur ? 'cur' : ''}">
+      <div class="col ${cur ? 'cur' : ''}" style="height:${h}%;background:${BAR_COLORS[i + 2]}">${x.v && (cur || x.v === max) ? `<span class="tip">${money(x.v)}</span>` : ''}</div>
+      <span class="lbl">${x.lbl}</span></div>`;
+  }).join('');
+  const nombreMes = MESES[m - 1];
+  return `<div class="card">
+    <div class="card-h"><h2>Gasto por mes</h2><span class="r">${money(tot[kAct])}</span></div>
+    <div class="m" style="color:var(--muted);font-size:12.5px;margin-top:-8px">Total de ${nombreMes}, sumando sus dos quincenas</div>
+    <div class="bars">${bars}</div>
+  </div>`;
+}
+
+function porCategoria(q, c) {
+  if (!q.gastos.length) return '';
+  const g = {};
+  for (const x of q.gastos) g[x.cat] = (g[x.cat] || 0) + (x.monto || 0);
+  const filas = Object.entries(g).sort((a, b) => b[1] - a[1]).map(([id, v]) => {
+    const cat = CAT[id] || CAT.otro;
+    const pct = c.gastos ? Math.round((v / c.gastos) * 100) : 0;
+    return `<div class="cat-r">
+      <span class="cat-i" style="background:${cat.c}26;color:${cat.c}">${cat.e}</span>
+      <div class="cat-b">
+        <div class="cat-l"><span>${cat.n}</span><b>${money(v)}</b></div>
+        <div class="track"><div style="width:${pct}%;background:${cat.c}"></div></div>
+      </div></div>`;
+  }).join('');
+  return `<div class="card">
+    <div class="card-h"><h2>En qué se va la quincena</h2><span class="m">${money(c.gastos)}</span></div>
+    <div class="cats">${filas}</div></div>`;
+}
+
+function anillo(valor, total, color) {
+  const R = 40, C = 2 * Math.PI * R;
+  const p = total > 0 ? Math.min(1, valor / total) : 0;
+  return `<svg class="ring" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="${R}" fill="none" stroke="var(--card-3)" stroke-width="9"/>
+    <circle cx="50" cy="50" r="${R}" fill="none" stroke="${color}" stroke-width="9" stroke-linecap="round"
+      stroke-dasharray="${p * C} ${C}" transform="rotate(-90 50 50)"/>
+    <text x="50" y="49" text-anchor="middle" class="rv">${money(valor)}</text>
+    <text x="50" y="65" text-anchor="middle" class="rs">${total > 0 ? money(total) : 'sin meta'}</text>
   </svg>`;
+}
+
+function metaYResumen(c) {
+  const total = totalAhorrado();
+  const meta = S.meta;
+  const ref = c.ingreso || 1;
+  const barra = (k, v, color) => `<div class="sm"><div class="sl"><span>${k}</span><b>${money(v)}</b></div>
+    <div class="track"><div style="width:${Math.min(100, Math.round((Math.max(v, 0) / ref) * 100))}%;background:${color}"></div></div></div>`;
+  return `<div class="grid2">
+    <button class="card ring-card" data-act="editMeta">
+      <h2>Meta de ahorro</h2>
+      ${anillo(total, meta.monto, '#34d399')}
+      <div class="rn">${meta.monto ? esc(meta.nombre) || 'Mi meta' : '🎯 Toca para crear una'}</div>
+    </button>
+    <div class="card sum-card">
+      <h2>Esta quincena</h2>
+      ${barra('Dinero', c.ingreso, '#34d399')}
+      ${barra('Gastos', c.gastos, '#f87171')}
+      ${barra('Ahorro', c.ahorro, '#3b82f6')}
+    </div>
+  </div>`;
 }
 
 function tarjetaDiaria(q, c) {
@@ -339,22 +423,23 @@ function tarjetaDiaria(q, c) {
   if (!c.ingreso) return '';
 
   const porDia = c.libre > 0 ? Math.floor((c.libre / dias) * 100) / 100 : 0;
+  const pd = money(porDia, { dec: porDia % 1 !== 0 });
   const msg = c.libre > 0
     ? (dias === 1
         ? `Hoy cobras. Tienes <b>${money(c.libre)}</b> libres para hoy.`
-        : `Tienes un total de <b>${money(c.libre)}</b> libres, lo que hace que puedas gastar <b>${money(porDia, { dec: porDia % 1 !== 0 })} al día</b> hasta que cobres.`)
+        : `Tienes un total de <b>${money(c.libre)}</b> libres, lo que hace que puedas gastar <b>${pd} al día</b> hasta que cobres.`)
     : 'No te queda dinero libre para el día a día. Revisa tus gastos o tu ahorro.';
 
   return `<div class="card daily">
     <div class="d-top">
       <div class="d-main">
         <div class="k">Puedes gastar al día</div>
-        <div class="v ${c.libre > 0 ? '' : 'neg'}">${money(porDia, { dec: porDia % 1 !== 0 })}</div>
+        <div class="v ${c.libre > 0 ? '' : 'neg'}">${pd}</div>
       </div>
       <div class="d-days"><b>${dias}</b><span>${dias === 1 ? 'día' : 'días'}</span></div>
     </div>
     <div class="d-msg">${msg}</div>
-    <div class="d-foot">📅 Cobras el ${cuando} · ${dias === 1 ? 'último día' : `contando hoy`}</div>
+    <div class="d-foot">📅 Cobras el ${cuando} · ${dias === 1 ? 'último día' : 'contando hoy'}</div>
   </div>`;
 }
 
@@ -364,7 +449,7 @@ function filaGasto(g, enEspera) {
   const tag = f === 'quincenal' ? '<span class="tag">quincenal</span>' : f === 'mensual' ? '<span class="tag mes">mensual</span>' : '';
   const sub = enEspera ? `Se paga con ${nombreMitad(g.mitad)}` : `${cat.n}${g.pagado ? ' · pagado' : ''}`;
   return `<div class="row ${g.pagado ? 'paid' : ''} ${enEspera ? 'waiting' : ''}">
-    <button class="ico" data-act="editGasto" data-id="${g.id}">${cat.e}</button>
+    <button class="ico" data-act="editGasto" data-id="${g.id}" style="background:${cat.c}26">${cat.e}</button>
     <button class="main" data-act="editGasto" data-id="${g.id}" style="text-align:left">
       <div class="t">${esc(g.nombre)}${tag}</div>
       <div class="s">${sub}</div>
@@ -374,15 +459,14 @@ function filaGasto(g, enEspera) {
   </div>`;
 }
 
-function vistaQuincena() {
+function vistaInicio() {
   const q = S.actual;
   const c = calc(q);
-  const sinIngreso = !c.ingreso;
   const hasta = cobroDespues(parse(q.cobro));
 
   const gastosHtml = q.gastos.length
     ? `<div class="list">${q.gastos.map(g => filaGasto(g, false)).join('')}</div>`
-    : `<div class="list"><div class="empty"><div class="e">🧾</div>Agrega lo que tienes que pagar esta quincena:<br>comida, albañil, renta…</div></div>`;
+    : `<div class="list"><div class="empty"><div class="e">🧾</div>Toca el botón <b>+</b> para agregar lo que tienes que pagar esta quincena: comida, albañil, renta…</div></div>`;
 
   const esperaHtml = q.enEspera.length
     ? `<div class="sec-h"><h2 style="font-size:15px">Mensuales de la otra quincena</h2><span class="meta">no cuentan ahora</span></div>
@@ -391,49 +475,36 @@ function vistaQuincena() {
 
   return `
     <header class="top">
-      <div><h1>Mi Ahorro</h1><div class="sub">${etiquetaCobro(q.cobro)} · cobras el ${diaMes(hasta)}</div></div>
+      <div class="brand"><img src="icons/icon-192.png" alt=""><div><h1>Mi Ahorro</h1><div class="sub">cobras el ${DIAS[hasta.getDay()]} ${diaMes(hasta)}</div></div></div>
     </header>
 
     ${tarjetaBCV()}
 
     <section class="hero">
-      <div class="label">Dinero de la quincena</div>
+      <div class="label">${etiquetaCobro(q.cobro)}</div>
       <div class="big">${money(c.ingreso)}</div>
       ${c.extra ? `<div class="hero-note">Incluye ${money(c.extra)} de capital agregado</div>` : ''}
       <div class="hero-btns">
-        <button class="edit" data-act="editIngreso">✏️ ${sinIngreso ? 'Poner cuánto tengo' : 'Cambiar'}</button>
-        <button class="edit" data-act="capital">➕ Agregar capital</button>
+        <button class="pill" data-act="editIngreso">✏️ ${c.ingreso ? 'Cambiar' : 'Poner cuánto tengo'}</button>
+        <button class="pill green" data-act="capital">＋ Agregar capital</button>
       </div>
-      <div class="hero-row">
-        ${donut(c)}
-        <div class="legend">
-          <div class="li"><span class="dot" style="background:#fff"></span><span class="name">Ahorro</span><span class="val">${money(c.ahorro)}</span></div>
-          <div class="li"><span class="dot" style="background:#fcd34d"></span><span class="name">Gastos</span><span class="val">${money(c.gastos)}</span></div>
-          <div class="li"><span class="dot" style="background:rgba(255,255,255,.4)"></span><span class="name">Libre</span><span class="val">${money(c.libre)}</span></div>
-        </div>
+      <div class="hero-split">
+        <button data-act="editAhorro" style="text-align:left"><div class="k"><span class="dot" style="background:#3b82f6"></span>Ahorro</div><div class="v">${money(c.ahorro)}</div></button>
+        <div><div class="k"><span class="dot" style="background:#f87171"></span>Gastos</div><div class="v">${money(c.gastos)}</div></div>
+        <div><div class="k"><span class="dot" style="background:#34d399"></span>Libre</div><div class="v ${c.libre < 0 ? 'neg' : ''}">${money(c.libre)}</div></div>
       </div>
     </section>
 
     ${c.libre < 0 ? `<div class="alert">⚠️ <div>Te faltan <b>${money(-c.libre)}</b>. Baja algún gasto o el ahorro de esta quincena.</div></div>` : ''}
 
     ${tarjetaDiaria(q, c)}
-
-    <div class="stat-grid">
-      <button class="card stat tap" data-act="editAhorro">
-        <div class="k">🐷 Voy a ahorrar</div>
-        <div class="v pos">${money(c.ahorro)}</div>
-        <div class="h">${q.ahorroModo === 'pct' ? `${q.ahorroValor}% del dinero` : 'Toca para cambiar'}</div>
-      </button>
-      <div class="card stat">
-        <div class="k">💵 Me queda libre</div>
-        <div class="v ${c.libre < 0 ? 'neg' : ''}">${money(c.libre)}</div>
-        <div class="h">${c.pendiente > 0 ? `Por pagar: ${money(c.pendiente)}` : (q.gastos.length ? 'Todo pagado ✅' : 'Sin gastos aún')}</div>
-      </div>
-    </div>
+    ${graficaMensual(q, c)}
+    ${porCategoria(q, c)}
+    ${metaYResumen(c)}
 
     <div class="sec-h">
       <h2>Gastos de la quincena</h2>
-      <span class="meta">${q.gastos.filter(g => g.pagado).length}/${q.gastos.length} pagados</span>
+      <span class="meta">${q.gastos.filter(g => g.pagado).length}/${q.gastos.length} pagados${c.pendiente > 0 ? ` · faltan ${money(c.pendiente)}` : ''}</span>
     </div>
     ${gastosHtml}
     ${esperaHtml}
@@ -483,13 +554,13 @@ function vistaAhorros() {
       ${meta.monto > 0
         ? `<div style="position:relative;z-index:1">
             <div class="progress"><div style="width:${pct}%"></div></div>
-            <div style="display:flex;justify-content:space-between;font-size:13px;margin-top:8px;opacity:.9">
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-top:8px">
               <span>🎯 ${esc(meta.nombre) || 'Mi meta'}: ${money(meta.monto)}</span><span>${pct}%</span>
             </div>
-            <div style="font-size:13px;margin-top:4px;opacity:.85">${total >= meta.monto ? '¡Lo lograste! 🎉' : `Te faltan ${money(meta.monto - total)}`}</div>
-            <button class="edit" style="margin-top:12px;position:relative" data-act="editMeta">✏️ Cambiar meta</button>
+            <div style="font-size:13px;margin-top:4px;color:var(--muted)">${total >= meta.monto ? '¡Lo lograste! 🎉' : `Te faltan ${money(meta.monto - total)}`}</div>
+            <div class="hero-btns" style="margin-top:12px"><button class="pill" data-act="editMeta">✏️ Cambiar meta</button></div>
           </div>`
-        : `<button class="edit" style="margin-top:8px;position:relative" data-act="editMeta">🎯 Ponerme una meta</button>`}
+        : `<div class="hero-btns"><button class="pill green" data-act="editMeta">🎯 Ponerme una meta</button></div>`}
     </section>
 
     <div class="btn-row">
@@ -519,13 +590,17 @@ function vistaAjustes() {
       Al terminar la quincena, tócale a <i>“Terminar quincena”</i> y tu ahorro se suma a tu alcancía.
     </div>
     <input type="file" id="fileImport" accept="application/json,.json" hidden>
-    <div class="foot">Mi Ahorro · v1.2</div>
+    <div class="card" style="font-size:13px;color:var(--muted);line-height:1.5">
+      💱 La tasa oficial del BCV se obtiene de <b style="color:var(--text)">DolarApi Venezuela</b> (ve.dolarapi.com), que publica la misma tasa de bcv.org.ve.
+    </div>
+    <div class="foot">Mi Ahorro · v2.0</div>
   `;
 }
 
 function render() {
   const v = $('#view');
-  v.innerHTML = tab === 'quincena' ? vistaQuincena() : tab === 'ahorros' ? vistaAhorros() : vistaAjustes();
+  v.innerHTML = tab === 'inicio' ? vistaInicio() : tab === 'calc' ? vistaCalc() : tab === 'ahorros' ? vistaAhorros() : vistaAjustes();
+  if (tab === 'calc') montarCalc();
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
 }
 
@@ -938,14 +1013,20 @@ document.querySelector('.tabbar').addEventListener('click', e => {
   window.scrollTo(0, 0);
 });
 
-$('#view').addEventListener('click', e => {
+$('#view').addEventListener('click', async e => {
+  const go = e.target.closest('[data-tabgo]');
+  if (go) { tab = go.dataset.tabgo; render(); window.scrollTo(0, 0); return; }
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const { act, id } = el.dataset;
   switch (act) {
     case 'editIngreso': return sheetIngreso();
     case 'capital': return sheetCapital();
-    case 'bcv': return sheetBCV();
+    case 'bcvRefrescar':
+      el.textContent = 'Actualizando…';
+      await actualizarBCV(true);
+      render();
+      return toast(bcvError ? 'Sin conexión, se muestra la última tasa' : 'Tasa actualizada ✅');
     case 'editAhorro': return sheetAhorro();
     case 'nuevoGasto': return sheetGasto(null);
     case 'editGasto': return sheetGasto(id);
@@ -966,7 +1047,7 @@ $('#view').addEventListener('click', e => {
     case 'importar': return importar();
     case 'borrarTodo':
       if (confirm('¿Seguro? Se borrarán todas tus quincenas y ahorros. Te recomiendo guardar un respaldo antes.')) {
-        S = estadoInicial(); guardar(); tab = 'quincena'; render(); toast('Datos borrados');
+        S = estadoInicial(); guardar(); tab = 'inicio'; render(); toast('Datos borrados');
       }
       return;
   }
@@ -982,6 +1063,8 @@ document.addEventListener('visibilitychange', () => {
 render();
 actualizarBCV(false);
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+// En la app de Android (Capacitor) los archivos ya vienen dentro del APK: no hace falta el service worker
+const esApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+if ('serviceWorker' in navigator && location.protocol !== 'file:' && !esApp) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
