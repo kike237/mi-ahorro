@@ -1,4 +1,4 @@
-const CACHE = 'mi-ahorro-v7';
+const CACHE = 'mi-ahorro-v8';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'vendor/capacitor.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
