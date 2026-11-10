@@ -23,7 +23,7 @@ const CAPITAL_RAPIDO = [50, 100, 200, 500, 1000, 1200];
 const CAT = Object.fromEntries(CATS.map(([id, e, n]) => [id, { e, n }]));
 
 const MONEDAS = [
-  ['MXN', 'Peso mexicano'], ['USD', 'Dólar'], ['COP', 'Peso colombiano'], ['ARS', 'Peso argentino'],
+  ['USD', 'Dólar'], ['VES', 'Bolívar'], ['MXN', 'Peso mexicano'], ['COP', 'Peso colombiano'], ['ARS', 'Peso argentino'],
   ['CLP', 'Peso chileno'], ['PEN', 'Sol peruano'], ['GTQ', 'Quetzal'], ['DOP', 'Peso dominicano'], ['EUR', 'Euro'],
 ];
 
@@ -97,7 +97,7 @@ function nuevaQuincena(prev) {
 }
 
 function estadoInicial() {
-  return { v: 2, moneda: 'MXN', meta: { nombre: '', monto: 0 }, actual: nuevaQuincena(null), historial: [], movs: [] };
+  return { v: 2, moneda: 'USD', meta: { nombre: '', monto: 0 }, actual: nuevaQuincena(null), historial: [], movs: [] };
 }
 
 // Completa datos de versiones anteriores
@@ -206,6 +206,98 @@ function toast(msg) {
   toastT = setTimeout(() => t.classList.remove('show'), 2400);
 }
 
+/* ---------------- Tasa BCV ---------------- */
+// Fuente: DolarApi Venezuela (publica la tasa oficial del BCV, la misma de bcv.org.ve)
+
+const BCV_KEY = 'mi-ahorro-bcv';
+const BCV_URL = 'https://ve.dolarapi.com/v1/cotizaciones';
+let BCV = (() => { try { return JSON.parse(localStorage.getItem(BCV_KEY)) || null; } catch (e) { return null; } })();
+let bcvCargando = false, bcvError = false;
+
+const bs = n => new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
+
+async function actualizarBCV(forzar) {
+  if (bcvCargando) return;
+  if (!forzar && BCV && Date.now() - BCV.obtenido < 60 * 60 * 1000) return; // máximo una vez por hora
+  bcvCargando = true;
+  try {
+    const res = await fetch(BCV_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    const of = m => data.find(x => x.moneda === m && x.fuente === 'oficial');
+    const usd = of('USD'), eur = of('EUR');
+    if (!usd || !eur) throw new Error('sin datos');
+    BCV = {
+      usd: usd.promedio, eur: eur.promedio,
+      fecha: String(usd.fechaActualizacion || '').slice(0, 10), obtenido: Date.now(),
+    };
+    bcvError = false;
+    try { localStorage.setItem(BCV_KEY, JSON.stringify(BCV)); } catch (e) { /* nada */ }
+  } catch (e) {
+    bcvError = true;
+  }
+  bcvCargando = false;
+  if (tab === 'quincena' && !$('#sheet').classList.contains('open')) render();
+}
+
+function tarjetaBCV() {
+  if (!BCV) {
+    return `<button class="card bcv" data-act="bcv">
+      <div class="bcv-h"><span>💱 Tasa BCV</span><span class="bcv-f">${bcvError ? 'Sin conexión' : 'Cargando…'}</span></div></button>`;
+  }
+  const f = BCV.fecha ? parse(BCV.fecha) : null;
+  const fecha = f ? `${DIAS[f.getDay()].slice(0, 3)} ${diaMes(f)}` : '';
+  return `<button class="card bcv" data-act="bcv">
+    <div class="bcv-h"><span>💱 Tasa BCV</span><span class="bcv-f">${bcvError ? '⚠️ sin conexión · ' : ''}${fecha}</span></div>
+    <div class="bcv-row">
+      <div><span class="bcv-c">🇺🇸 USD</span><b>Bs. ${bs(BCV.usd)}</b></div>
+      <div><span class="bcv-c">🇪🇺 EUR</span><b>Bs. ${bs(BCV.eur)}</b></div>
+    </div></button>`;
+}
+
+function sheetBCV() {
+  if (!BCV) { actualizarBCV(true); toast(bcvError ? 'Sin conexión. Intenta de nuevo con internet.' : 'Buscando la tasa…'); return; }
+  let de = 'USD';
+  const f = BCV.fecha ? parse(BCV.fecha) : null;
+  openSheet(`
+    <h3>Tasa oficial BCV</h3>
+    <p class="hint">Fecha valor: ${f ? `${DIAS[f.getDay()]} ${f.getDate()} de ${MESES[f.getMonth()]}` : '—'}
+      · revisada ${new Date(BCV.obtenido).toLocaleString('es-VE', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</p>
+    <div class="summary">
+      <div class="sr"><span>🇺🇸 1 dólar</span><b>Bs. ${bs(BCV.usd)}</b></div>
+      <div class="sr"><span>🇪🇺 1 euro</span><b>Bs. ${bs(BCV.eur)}</b></div>
+    </div>
+    <div class="field"><label>Convertir</label>
+      <div class="seg" id="cvDe"><button data-d="USD">Dólares</button><button data-d="EUR">Euros</button><button data-d="VES">Bolívares</button></div></div>
+    <div class="field"><div class="money"><span class="cur" id="cvCur">$</span>
+      <input class="input" id="cvIn" inputmode="decimal" autocomplete="off" placeholder="0"></div></div>
+    <div class="summary" id="cvOut" style="margin-top:12px"></div>
+    <button class="btn soft mt" id="cvRef">🔄 Actualizar tasa</button>`,
+    b => {
+      const inp = $('#cvIn', b);
+      const upd = () => {
+        const v = num(inp.value);
+        b.querySelectorAll('#cvDe button').forEach(x => x.classList.toggle('on', x.dataset.d === de));
+        $('#cvCur', b).textContent = de === 'USD' ? '$' : de === 'EUR' ? '€' : 'Bs.';
+        const enBs = de === 'VES' ? v : v * (de === 'USD' ? BCV.usd : BCV.eur);
+        $('#cvOut', b).innerHTML = [
+          de !== 'VES' ? `<div class="sr"><span>En bolívares</span><b>Bs. ${bs(enBs)}</b></div>` : '',
+          de !== 'USD' ? `<div class="sr"><span>En dólares</span><b>$ ${bs(enBs / BCV.usd)}</b></div>` : '',
+          de !== 'EUR' ? `<div class="sr"><span>En euros</span><b>€ ${bs(enBs / BCV.eur)}</b></div>` : '',
+        ].join('');
+      };
+      b.querySelectorAll('#cvDe button').forEach(x => x.onclick = () => { de = x.dataset.d; upd(); inp.focus(); });
+      inp.oninput = upd;
+      upd();
+      $('#cvRef', b).onclick = async () => {
+        $('#cvRef', b).textContent = 'Actualizando…';
+        await actualizarBCV(true);
+        closeSheet();
+        toast(bcvError ? 'Sin conexión, se muestra la última tasa' : 'Tasa actualizada ✅');
+      };
+    });
+}
+
 /* ---------------- Vistas ---------------- */
 
 function donut(c) {
@@ -301,6 +393,8 @@ function vistaQuincena() {
     <header class="top">
       <div><h1>Mi Ahorro</h1><div class="sub">${etiquetaCobro(q.cobro)} · cobras el ${diaMes(hasta)}</div></div>
     </header>
+
+    ${tarjetaBCV()}
 
     <section class="hero">
       <div class="label">Dinero de la quincena</div>
@@ -851,6 +945,7 @@ $('#view').addEventListener('click', e => {
   switch (act) {
     case 'editIngreso': return sheetIngreso();
     case 'capital': return sheetCapital();
+    case 'bcv': return sheetBCV();
     case 'editAhorro': return sheetAhorro();
     case 'nuevoGasto': return sheetGasto(null);
     case 'editGasto': return sheetGasto(id);
@@ -878,9 +973,14 @@ $('#view').addEventListener('click', e => {
 });
 
 // Si la app queda abierta de un día para otro, actualiza los días que faltan
-document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('#sheet').classList.contains('open')) render(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (!$('#sheet').classList.contains('open')) render();
+  actualizarBCV(false);
+});
 
 render();
+actualizarBCV(false);
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
