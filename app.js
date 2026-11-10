@@ -11,15 +11,12 @@ const CATS = [
   ['comida', '🍽️', 'Comida'],
   ['casa', '🏠', 'Casa / Renta'],
   ['obra', '👷', 'Albañil / Obra'],
-  ['servicios', '💡', 'Luz, agua, gas'],
   ['telefono', '📱', 'Teléfono / Internet'],
-  ['transporte', '🚗', 'Transporte'],
-  ['salud', '💊', 'Salud'],
-  ['escuela', '🎓', 'Escuela'],
   ['deudas', '💳', 'Deudas'],
   ['gustos', '🎉', 'Gustos'],
   ['otro', '📦', 'Otro'],
 ];
+const MONTOS_RAPIDOS = [10, 20, 50, 100, 200];
 const CAT = Object.fromEntries(CATS.map(([id, e, n]) => [id, { e, n }]));
 
 const MONEDAS = [
@@ -407,13 +404,17 @@ function sheetAhorro() {
 function sheetGasto(id) {
   const q = S.actual;
   const g = id ? q.gastos.find(x => x.id === id) : null;
-  let cat = g ? g.cat : 'comida';
+  let cat = g && CAT[g.cat] ? g.cat : g ? 'otro' : 'comida';
   let fijo = g ? !!g.fijo : false;
   openSheet(`
     <h3>${g ? 'Editar gasto' : 'Nuevo gasto'}</h3>
     <div class="field"><label for="fNom">¿Qué es?</label>
       <input class="input" id="fNom" maxlength="40" placeholder="Ej. Comida, pagar al albañil…" value="${g ? esc(g.nombre) : ''}"></div>
     ${moneyField('fMon', g ? g.monto : '', '¿Cuánto?')}
+    <div class="chips" id="montos" style="margin-top:10px">
+      ${MONTOS_RAPIDOS.map(m => `<button class="chip" data-m="${m}">+${money(m)}</button>`).join('')}
+      <button class="chip" data-m="0">Borrar</button>
+    </div>
     <div class="field"><label>Categoría</label>
       <div class="chips" id="cats">${CATS.map(([cid, e, n]) => `<button class="chip" data-c="${cid}">${e} ${n}</button>`).join('')}</div></div>
     <div class="switch"><div><div class="st">Se repite cada quincena</div><div class="ss">Se copia sola a la siguiente quincena</div></div>
@@ -428,6 +429,11 @@ function sheetGasto(id) {
         if (!nom.value.trim()) nom.value = CAT[cat].n.split(' /')[0].split(',')[0];
       });
       drawCats();
+      const mon = $('#fMon', b);
+      b.querySelectorAll('#montos .chip').forEach(c => c.onclick = () => {
+        const m = +c.dataset.m;
+        mon.value = m ? num(mon.value) + m : '';
+      });
       const tg = $('#tgFijo', b);
       tg.classList.toggle('on', fijo);
       tg.onclick = () => { fijo = !fijo; tg.classList.toggle('on', fijo); };
