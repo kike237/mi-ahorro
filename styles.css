@@ -318,3 +318,65 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .u3 span { display: block; font-size: 11.5px; color: var(--muted); }
 .u3 b { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .usdt .uf { margin-bottom: 0; }
+
+/* ---------- Saludo y campanita ---------- */
+.hello { text-align: left; min-width: 0; }
+.hello h1 { font-size: 24px; }
+.bell {
+  position: relative; flex: none; width: 44px; height: 44px; border-radius: 50%;
+  background: var(--card); border: 1px solid var(--line); display: grid; place-items: center; color: var(--text);
+}
+.bell svg { width: 21px; height: 21px; }
+.bell-dot { position: absolute; top: 10px; right: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--card); }
+
+/* ---------- Comparación vs periodo anterior ---------- */
+.vs-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; position: relative; z-index: 1; flex-wrap: wrap; }
+.vs {
+  display: inline-flex; align-items: center; gap: 3px; padding: 3px 9px; border-radius: 99px; font-size: 12.5px; font-weight: 700;
+  background: var(--card-3); color: var(--text);
+}
+.vs.good { background: var(--primary-soft); color: var(--primary); }
+.vs.bad { background: var(--danger-soft); color: var(--danger); }
+.vs-l { font-size: 12.5px; color: var(--muted); }
+.card .vs-row { margin-top: 10px; }
+
+/* ---------- Línea de ahorro ---------- */
+.spark { display: block; width: 100%; height: 56px; margin-top: 12px; position: relative; z-index: 1; }
+
+/* ---------- Interruptores ---------- */
+.switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.switch:last-child { border-bottom: 0; }
+.switch .st { font-size: 15px; }
+.switch .ss { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.tg { width: 50px; height: 30px; border-radius: 99px; background: var(--card-3); position: relative; flex: none; transition: background .2s; }
+.tg::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: transform .22s cubic-bezier(.2, .8, .2, 1); box-shadow: 0 1px 3px rgba(0, 0, 0, .4); }
+.tg.on { background: var(--primary-2); }
+.tg.on::after { transform: translateX(20px); }
+.input.time { width: auto; padding: 8px 12px; font-size: 16px; color-scheme: dark; }
+
+/* ---------- Animaciones ---------- */
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes growY { from { transform: scaleY(0); } }
+@keyframes growX { from { transform: scaleX(0); } }
+@keyframes ringIn { from { stroke-dasharray: 0 999; } }
+@keyframes pop { 0% { transform: scale(1); } 45% { transform: scale(1.22); } 100% { transform: scale(1); } }
+
+#view.enter > * { animation: rise .45s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 45ms); }
+#view.enter > .fab { animation-delay: .3s; }
+#view.enter .bars .col { transform-origin: bottom; animation: growY .75s cubic-bezier(.2, .8, .2, 1) both; animation-delay: .25s; }
+#view.enter .track > div, #view.enter .progress > div { transform-origin: left; animation: growX .8s cubic-bezier(.2, .8, .2, 1) both; animation-delay: .3s; }
+#view.enter .ring circle + circle { animation: ringIn 1s cubic-bezier(.2, .8, .2, 1) both; animation-delay: .3s; }
+.check.pop { animation: pop .3s ease-out; }
+
+/* Respuesta al tocar */
+.card, .pill, .chip, .row, .bell, .hello, .tabbar button, .hero-split > button { transition: transform .12s ease, background .2s, border-color .2s; }
+.pill:active, .chip:active, .bell:active, button.card:active, .row:active, .hero-split > button:active { transform: scale(.97); }
+.tabbar button:active svg { transform: scale(.9); }
+.tabbar svg { transition: background .25s, transform .12s; }
+
+/* Hojas: el fondo aparece suave y la hoja sube con rebote leve (ya definido); el contenido entra en cascada */
+.sheet.open #sheetBody > * { animation: rise .35s cubic-bezier(.2, .8, .2, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

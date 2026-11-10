@@ -99,12 +99,19 @@ function nuevaQuincena(prev) {
 }
 
 function estadoInicial() {
-  return { v: 2, moneda: 'USD', meta: { nombre: '', monto: 0 }, actual: nuevaQuincena(null), historial: [], movs: [] };
+  return {
+    v: 3, moneda: 'USD', meta: { nombre: '', monto: 0 }, actual: nuevaQuincena(null), historial: [], movs: [],
+    perfil: { nombre: '', preguntado: false },
+    notif: { bcv: true, diario: true, hora: '20:00', cobro: true },
+  };
 }
 
 // Completa datos de versiones anteriores
 function migrar(s) {
-  s = { ...estadoInicial(), ...s };
+  const base = estadoInicial();
+  s = { ...base, ...s };
+  s.perfil = { ...base.perfil, ...(s.perfil || {}) };
+  s.notif = { ...base.notif, ...(s.notif || {}) };
   const q = s.actual;
   if (!q.cobro) q.cobro = ymd(cobroPara(parse(q.inicio || today())));
   if (!Array.isArray(q.extras)) q.extras = [];
@@ -113,7 +120,7 @@ function migrar(s) {
     if (!g.freq) g.freq = freqDe(g);
     if (!CAT[g.cat]) g.cat = 'otro';
   }
-  s.v = 2;
+  s.v = 3;
   return s;
 }
 
@@ -420,6 +427,17 @@ function mesDeQuincena(cobroIso, inicioIso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 
+// Etiqueta "↑ 12% vs ..." — en gastos subir es malo (rojo); en ahorro subir es bueno (verde)
+function chipVs(actual, antes, etiqueta, subirEsBueno = false) {
+  if (!antes || antes <= 0 || actual == null) return '';
+  const pct = Math.round(((actual - antes) / antes) * 100);
+  if (!isFinite(pct)) return '';
+  const sube = pct > 0;
+  const clase = pct === 0 ? '' : (sube === subirEsBueno ? 'good' : 'bad');
+  const flecha = pct === 0 ? '＝' : sube ? '↑' : '↓';
+  return `<span class="vs ${clase}">${flecha} ${Math.abs(pct)}%</span><span class="vs-l">${etiqueta}</span>`;
+}
+
 function graficaMensual(q, c) {
   const tot = {};
   for (const h of S.historial) {
@@ -445,9 +463,11 @@ function graficaMensual(q, c) {
       <span class="lbl">${x.lbl}</span></div>`;
   }).join('');
   const nombreMes = MESES[m - 1];
+  const ant = meses[4];
   return `<div class="card">
     <div class="card-h"><h2>Gasto por mes</h2><span class="r">${money(tot[kAct])}</span></div>
     <div class="m" style="color:var(--muted);font-size:12.5px;margin-top:-8px">Total de ${nombreMes}, sumando sus dos quincenas</div>
+    ${ant.v ? `<div class="vs-row">${chipVs(tot[kAct], ant.v, `vs ${MESES[(m + 10) % 12]} · ${nombreMes} va en curso`)}</div>` : ''}
     <div class="bars">${bars}</div>
   </div>`;
 }
@@ -566,17 +586,28 @@ function vistaInicio() {
        <div class="list">${q.enEspera.map(g => filaGasto(g, true)).join('')}</div>`
     : '';
 
+  const prev = S.historial[S.historial.length - 1];
+  const vsQ = prev && c.gastos ? chipVs(c.gastos, prev.gastos, 'en gastos vs la quincena pasada') : '';
+
   return `
     <header class="top">
-      <div class="brand"><img src="icons/icon-192.png" alt=""><div><h1>Mi Ahorro</h1><div class="sub">cobras el ${DIAS[hasta.getDay()]} ${diaMes(hasta)}</div></div></div>
+      <button class="hello" data-act="nombre">
+        <h1>Hola${S.perfil.nombre ? `, ${esc(S.perfil.nombre)}` : ''} 👋</h1>
+        <div class="sub">Así va tu quincena · cobras el ${DIAS[hasta.getDay()]} ${diaMes(hasta)}</div>
+      </button>
+      <button class="bell" data-act="notif" aria-label="Notificaciones">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        ${S.notif.bcv || S.notif.diario || S.notif.cobro ? '<span class="bell-dot"></span>' : ''}
+      </button>
     </header>
 
     ${tarjetaBCV()}
 
     <section class="hero">
       <div class="label">${etiquetaCobro(q.cobro)}</div>
-      <div class="big">${money(c.ingreso)}</div>
+      <div class="big" data-count="${c.ingreso}">${money(c.ingreso)}</div>
       ${c.extra ? `<div class="hero-note">Incluye ${money(c.extra)} de capital agregado</div>` : ''}
+      ${vsQ ? `<div class="vs-row">${vsQ}</div>` : ''}
       <div class="hero-btns">
         <button class="pill" data-act="editIngreso">✏️ ${c.ingreso ? 'Cambiar' : 'Poner cuánto tengo'}</button>
         <button class="pill green" data-act="capital">＋ Agregar capital</button>
@@ -606,6 +637,19 @@ function vistaInicio() {
 
     <button class="fab" data-act="nuevoGasto" aria-label="Agregar gasto">+</button>
   `;
+}
+
+function sparkline(vals) {
+  const W = 300, H = 56, min = Math.min(...vals), max = Math.max(...vals), r = max - min || 1;
+  const pts = vals.map((v, i) => [(i / (vals.length - 1)) * W, H - 6 - ((v - min) / r) * (H - 12)]);
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const last = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <defs><linearGradient id="spg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#34d399" stop-opacity=".35"/><stop offset="1" stop-color="#34d399" stop-opacity="0"/></linearGradient></defs>
+    <path d="${d} L${W},${H} L0,${H} Z" fill="url(#spg)"/>
+    <path class="spark-line" d="${d}" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="4" fill="#34d399"/>
+  </svg>`;
 }
 
 function vistaAhorros() {
@@ -638,12 +682,24 @@ function vistaAhorros() {
       }).join('')}</div>`
     : `<div class="list"><div class="empty"><div class="e">🌱</div>Cuando termines tu primera quincena,<br>tu ahorro aparecerá aquí.</div></div>`;
 
+  // Línea de cómo ha crecido el ahorro (acumulado)
+  const pasos = [
+    ...S.historial.map(h => ({ f: h.fin, v: h.ahorroReal || 0 })),
+    ...S.movs.map(m => ({ f: m.fecha, v: m.monto || 0 })),
+  ].sort((a, b) => (a.f > b.f ? 1 : a.f < b.f ? -1 : 0));
+  let acum = 0;
+  const serie = [0, ...pasos.map(p => (acum += p.v))].slice(-12);
+  const ult = S.historial[S.historial.length - 1], penult = S.historial[S.historial.length - 2];
+  const vsAh = ult && penult ? chipVs(ult.ahorroReal, penult.ahorroReal, 'ahorraste vs la quincena anterior', true) : '';
+
   return `
     <header class="top"><div><h1>Mis ahorros</h1><div class="sub">Todo lo que has juntado</div></div></header>
 
     <section class="hero">
       <div class="label">Llevo ahorrado</div>
-      <div class="big">${money(total)}</div>
+      <div class="big" data-count="${total}">${money(total)}</div>
+      ${vsAh ? `<div class="vs-row">${vsAh}</div>` : ''}
+      ${serie.length > 2 ? sparkline(serie) : ''}
       ${meta.monto > 0
         ? `<div style="position:relative;z-index:1">
             <div class="progress"><div style="width:${pct}%"></div></div>
@@ -671,6 +727,8 @@ function vistaAjustes() {
   return `
     <header class="top"><div><h1>Ajustes</h1><div class="sub">Tus datos se guardan solo en este teléfono</div></div></header>
     <div class="list settings">
+      <button class="row" data-act="nombre"><span class="ico">👋</span><span class="main"><div class="t">Tu nombre</div><div class="s">${S.perfil.nombre ? esc(S.perfil.nombre) : 'Para saludarte en el inicio'}</div></span><span>›</span></button>
+      <button class="row" data-act="notif"><span class="ico">🔔</span><span class="main"><div class="t">Notificaciones</div><div class="s">${[S.notif.bcv && 'tasa BCV', S.notif.diario && `recordatorio ${S.notif.hora}`, S.notif.cobro && 'día de cobro'].filter(Boolean).join(' · ') || 'Apagadas'}</div></span><span>›</span></button>
       <button class="row" data-act="moneda"><span class="ico">💱</span><span class="main"><div class="t">Moneda</div><div class="s">${mon ? mon[1] : S.moneda} (${S.moneda})</div></span><span>›</span></button>
       <button class="row" data-act="exportar"><span class="ico">📤</span><span class="main"><div class="t">Guardar respaldo</div><div class="s">Descarga un archivo con todos tus datos</div></span><span>›</span></button>
       <button class="row" data-act="importar"><span class="ico">📥</span><span class="main"><div class="t">Cargar respaldo</div><div class="s">Recupera tus datos desde un archivo</div></span><span>›</span></button>
@@ -684,17 +742,44 @@ function vistaAjustes() {
     </div>
     <input type="file" id="fileImport" accept="application/json,.json" hidden>
     <div class="card" style="font-size:13px;color:var(--muted);line-height:1.5">
-      💱 La tasa oficial del BCV se obtiene de <b style="color:var(--text)">DolarApi Venezuela</b> (ve.dolarapi.com), que publica la misma tasa de bcv.org.ve.
+      💱 La tasa BCV se lee directo de <b style="color:var(--text)">bcv.org.ve</b>. Si esa página no responde se usa <b style="color:var(--text)">DolarApi Venezuela</b> como respaldo.
+      El precio del USDT es el promedio de los primeros anuncios de <b style="color:var(--text)">Binance P2P</b> (no es una tasa oficial).
     </div>
-    <div class="foot">Mi Ahorro · v2.0</div>
+    <div class="foot">Mi Ahorro · v2.1</div>
   `;
 }
 
-function render() {
+/* ---------------- Animaciones ---------------- */
+const sinMovimiento = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Cuenta el número desde 0 hasta su valor (solo al entrar a la pestaña)
+function contar(el) {
+  const fin = +el.dataset.count;
+  if (!fin || sinMovimiento) return;
+  const t0 = performance.now(), dur = 650;
+  const paso = t => {
+    const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = money(Math.round(fin * e));
+    if (p < 1) requestAnimationFrame(paso); else el.textContent = money(fin);
+  };
+  requestAnimationFrame(paso);
+}
+
+let tabAnterior = null;
+function render(animar) {
   const v = $('#view');
+  if (animar === undefined) animar = tab !== tabAnterior;
+  tabAnterior = tab;
   v.innerHTML = tab === 'inicio' ? vistaInicio() : tab === 'calc' ? vistaCalc() : tab === 'ahorros' ? vistaAhorros() : vistaAjustes();
   if (tab === 'calc') montarCalc();
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  v.classList.remove('enter');
+  if (animar && !sinMovimiento) {
+    [...v.children].forEach((el, i) => el.style.setProperty('--i', Math.min(i, 9)));
+    void v.offsetWidth; // reinicia la animación
+    v.classList.add('enter');
+    v.querySelectorAll('[data-count]').forEach(contar);
+  }
 }
 
 /* ---------------- Hoja inferior (bottom sheet) ---------------- */
@@ -1062,6 +1147,119 @@ function sheetMoneda() {
     }));
 }
 
+/* ---- Nombre ---- */
+function sheetNombre() {
+  S.perfil.preguntado = true;
+  guardar();
+  openSheet(`
+    <h3>¿Cómo te llamas? 👋</h3>
+    <p class="hint">Para saludarte cuando abras la app.</p>
+    <div class="field"><input class="input" id="fNombre" maxlength="24" placeholder="Tu nombre" value="${esc(S.perfil.nombre)}" autocomplete="given-name"></div>
+    <button class="btn mt" id="ok">Guardar</button>
+    <button class="btn ghost" id="skip" style="margin-top:6px">Ahora no</button>`,
+    b => {
+      const inp = $('#fNombre', b);
+      focusLater(inp);
+      const save = () => { S.perfil.nombre = inp.value.trim(); guardar(); closeSheet(); render(); };
+      $('#ok', b).onclick = save;
+      inp.onkeydown = e => { if (e.key === 'Enter') save(); };
+      $('#skip', b).onclick = () => closeSheet();
+    });
+}
+
+/* ---- Notificaciones ---- */
+const plugin = n => (esApp && window.Capacitor && typeof Capacitor.registerPlugin === 'function' ? Capacitor.registerPlugin(n) : null);
+const LN = plugin('LocalNotifications');
+const PREF = plugin('Preferences');
+
+async function permisoNotif(pedir) {
+  if (!LN) return false;
+  try {
+    let p = await LN.checkPermissions();
+    if (p.display !== 'granted' && pedir) p = await LN.requestPermissions();
+    return p.display === 'granted';
+  } catch (e) { return false; }
+}
+
+// Programa (o borra) los recordatorios según los ajustes. Se llama al abrir la app y al guardar.
+async function syncNotificaciones() {
+  if (!LN) return;
+  try {
+    if (PREF) await PREF.set({ key: 'notif_bcv', value: S.notif.bcv ? '1' : '0' }); // lo lee el aviso nativo de la tasa
+    await LN.createChannel({ id: 'recordatorios', name: 'Recordatorios', description: 'Recordatorio diario y día de cobro', importance: 4 });
+    const pend = await LN.getPending();
+    if (pend.notifications && pend.notifications.length) await LN.cancel({ notifications: pend.notifications.map(n => ({ id: n.id })) });
+
+    const lista = [];
+    if (S.notif.diario) {
+      const [h, m] = String(S.notif.hora || '20:00').split(':').map(Number);
+      lista.push({
+        id: 1, channelId: 'recordatorios',
+        title: 'El día casi termina ✍️',
+        body: 'Actualiza tus números: anota lo que gastaste hoy en Mi Ahorro.',
+        schedule: { on: { hour: h, minute: m }, allowWhileIdle: true },
+      });
+    }
+    if (S.notif.cobro) {
+      // los próximos 6 días de cobro, a las 9:00 a. m.
+      let d = hoyD();
+      for (let i = 0; i < 6; i++) {
+        d = cobroDesde(d);
+        const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9, 0, 0);
+        if (at > new Date()) {
+          lista.push({
+            id: 100 + i, channelId: 'recordatorios',
+            title: '¡Hoy cobras! 💰',
+            body: 'Termina tu quincena en Mi Ahorro y aparta tu ahorro primero.',
+            schedule: { at, allowWhileIdle: true },
+          });
+        }
+        d = addDays(d, 1);
+      }
+    }
+    if (lista.length) await LN.schedule({ notifications: lista });
+  } catch (e) { console.warn('notificaciones', e); }
+}
+
+function sheetNotif() {
+  const n = { ...S.notif };
+  const fila = (k, ico, t, s) => `<div class="switch"><div><div class="st">${ico} ${t}</div><div class="ss">${s}</div></div>
+    <button class="tg ${n[k] ? 'on' : ''}" data-k="${k}" aria-label="${t}"></button></div>`;
+  openSheet(`
+    <h3>Notificaciones</h3>
+    <p class="hint">${esApp ? 'Elige qué avisos quieres recibir.' : '⚠️ Las notificaciones solo funcionan en la app de Android.'}</p>
+    <div class="summary">
+      ${fila('bcv', '💱', 'Tasa BCV actualizada', '“Hemos actualizado la tasa BCV” cuando el BCV publique una nueva')}
+      ${fila('diario', '✍️', 'Recordatorio del día', '“El día casi termina, actualiza tus números”')}
+      <div class="switch" id="horaBox"><div class="st" style="color:var(--muted)">⏰ Hora del recordatorio</div>
+        <input type="time" class="input time" id="fHora" value="${n.hora}"></div>
+      ${fila('cobro', '💰', 'Día de cobro', 'El 15 y fin de mes, a las 9:00 a. m.')}
+    </div>
+    <button class="btn mt" id="ok">Guardar</button>
+    ${esApp ? '<button class="btn soft" id="test" style="margin-top:10px">Probar una notificación</button>' : ''}`,
+    b => {
+      const horaBox = $('#horaBox', b);
+      const pintar = () => { horaBox.style.display = n.diario ? '' : 'none'; };
+      b.querySelectorAll('.tg').forEach(t => t.onclick = () => { n[t.dataset.k] = !n[t.dataset.k]; t.classList.toggle('on', n[t.dataset.k]); pintar(); });
+      pintar();
+      $('#ok', b).onclick = async () => {
+        n.hora = $('#fHora', b).value || '20:00';
+        S.notif = n; guardar(); closeSheet(); render();
+        if (esApp && (n.bcv || n.diario || n.cobro) && !(await permisoNotif(true))) {
+          toast('Activa las notificaciones de Mi Ahorro en los ajustes del teléfono');
+        } else toast('Notificaciones guardadas 🔔');
+        syncNotificaciones();
+      };
+      const t = $('#test', b);
+      if (t) t.onclick = async () => {
+        if (!(await permisoNotif(true))) return toast('Activa las notificaciones en los ajustes del teléfono');
+        await LN.createChannel({ id: 'recordatorios', name: 'Recordatorios', importance: 4 });
+        await LN.schedule({ notifications: [{ id: 999, channelId: 'recordatorios', title: 'Así se verán tus avisos 🔔', body: 'El día casi termina, actualiza tus números ✍️', schedule: { at: new Date(Date.now() + 3000) } }] });
+        toast('Llegará en 3 segundos…');
+      };
+    });
+}
+
 /* ---- Respaldo ---- */
 function exportar() {
   const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
@@ -1115,6 +1313,8 @@ $('#view').addEventListener('click', async e => {
   switch (act) {
     case 'editIngreso': return sheetIngreso();
     case 'capital': return sheetCapital();
+    case 'nombre': return sheetNombre();
+    case 'notif': return sheetNotif();
     case 'bcvRefrescar':
       el.textContent = 'Actualizando…';
       await actualizarBCV(true);
@@ -1125,7 +1325,11 @@ $('#view').addEventListener('click', async e => {
     case 'editGasto': return sheetGasto(id);
     case 'togglePago': {
       const g = S.actual.gastos.find(x => x.id === id);
-      if (g) { g.pagado = !g.pagado; guardar(); render(); }
+      if (g) {
+        g.pagado = !g.pagado; guardar(); render(false);
+        const ch = $(`.check[data-id="${id}"]`);
+        if (ch && g.pagado) ch.classList.add('pop');
+      }
       return;
     }
     case 'cerrar':
@@ -1153,8 +1357,11 @@ document.addEventListener('visibilitychange', () => {
   actualizarBCV(false);
 });
 
-render();
+render(true);
 actualizarBCV(false);
+syncNotificaciones();
+// La primera vez: preguntar el nombre
+if (!S.perfil.preguntado) setTimeout(sheetNombre, 700);
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:' && !esApp) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
