@@ -82,6 +82,26 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .hero .label { font-size: 13px; opacity: .85; text-transform: uppercase; letter-spacing: .06em; }
 .hero .big { font-size: 38px; font-weight: 700; letter-spacing: -.02em; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
 .hero .edit { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.18); padding: 6px 12px; border-radius: 99px; font-size: 13px; color: #fff; }
+.hero-note { font-size: 13px; opacity: .85; margin-bottom: 8px; }
+.hero-btns { display: flex; flex-wrap: wrap; gap: 8px; position: relative; z-index: 1; }
+
+/* ---------- Gasto diario ---------- */
+.daily { border: 1.5px solid var(--primary-soft); }
+.daily .d-top { display: flex; align-items: center; gap: 12px; }
+.daily .d-main { flex: 1; min-width: 0; }
+.daily .k { color: var(--muted); font-size: 13px; }
+.daily .v { font-size: 30px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--primary); }
+.daily .v.neg { color: var(--danger); }
+.daily .d-days {
+  flex: none; width: 64px; height: 64px; border-radius: 18px; background: var(--primary-soft); color: var(--primary);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+}
+.daily .d-days b { font-size: 26px; }
+.daily .d-days span { font-size: 12px; margin-top: 3px; }
+.daily .d-msg { font-size: 14.5px; line-height: 1.45; margin-top: 10px; }
+.daily .d-foot { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+.daily.late { border-color: var(--spend); }
+
 .hero-row { display: flex; align-items: center; gap: 18px; margin-top: 18px; position: relative; z-index: 1; }
 .donut { width: 118px; height: 118px; flex: none; }
 .donut .center-t { font-size: 11px; fill: rgba(255,255,255,.8); }
@@ -140,6 +160,9 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 }
 .check.on { background: var(--primary); border-color: var(--primary); color: #fff; }
 .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--primary-soft); color: var(--primary); margin-left: 6px; vertical-align: 1px; }
+
+.tag.mes { background: color-mix(in srgb, var(--free) 25%, transparent); color: color-mix(in srgb, var(--free) 70%, var(--text)); }
+.row.waiting { opacity: .65; }
 
 .empty { text-align: center; padding: 28px 16px; color: var(--muted); }
 .empty .e { font-size: 38px; margin-bottom: 6px; }
@@ -212,14 +235,20 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   outline: none; font-size: 17px;
 }
 .input:focus { border-color: var(--primary); }
-.money { position: relative; }
-.money .cur { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 22px; font-weight: 600; }
-.money .input { padding-left: 34px; font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.money.pct .cur { left: auto; right: 16px; }
-.money.pct .input { padding-left: 14px; padding-right: 40px; }
+.money {
+  display: flex; align-items: center; gap: 8px; padding: 0 14px;
+  border-radius: 14px; border: 1.5px solid var(--line); background: var(--card-2);
+}
+.money:focus-within { border-color: var(--primary); }
+.money .cur { flex: none; color: var(--muted); font-size: 20px; font-weight: 600; }
+.money .input {
+  flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 0;
+  font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.money.pct { flex-direction: row-reverse; }
 
 .seg { display: flex; background: var(--card-2); padding: 4px; border-radius: 14px; gap: 4px; }
-.seg button { flex: 1; padding: 10px; border-radius: 11px; font-weight: 600; font-size: 14px; color: var(--muted); }
+.seg button { flex: 1; padding: 10px 6px; border-radius: 11px; font-weight: 600; font-size: 13.5px; color: var(--muted); }
 .seg button.on { background: var(--card); color: var(--text); box-shadow: var(--shadow); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
