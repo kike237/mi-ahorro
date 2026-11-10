@@ -380,3 +380,9 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Enlace al Instagram del BCV ---------- */
+.ig { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 12px; text-decoration: none; color: var(--muted); font-size: 13px; }
+.ig b { color: var(--primary); white-space: nowrap; font-size: 13.5px; }
+.card.ig.solo { padding: 14px 16px; margin-top: 14px; }
+.upd .ig { padding: 12px 0 8px; }

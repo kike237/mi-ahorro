@@ -136,7 +136,7 @@ function cargar() {
 }
 
 let S = cargar();
-const TABS = ['inicio', 'calc', 'ahorros', 'ajustes'];
+const TABS = ['inicio', 'calc', 'ajustes'];
 let tab = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'inicio';
 
 function guardar() {
@@ -343,28 +343,21 @@ const tasaDe = d => (d === 'USDT' ? (USDT ? USDT.promedio : 0) : BCV ? (d === 'U
 const simb = d => DIVISAS[d].s;
 const fmtIn = n => (n ? String(Math.round(n * 100) / 100) : '');
 
+const IG_BCV = 'https://www.instagram.com/bcv.org.ve/';
+
 function vistaCalc() {
   if (CALC.div === 'USDT' && !USDT) CALC.div = 'USD';
-  const fuente = BCV && BCV.fuente === 'bcv'
-    ? '✅ Fuente: bcv.org.ve (oficial)'
-    : '↪️ Fuente: DolarApi Venezuela (respaldo, copia la tasa del BCV)';
 
   const bcvHtml = BCV
     ? `<div class="rates">
         <div class="card"><div class="rk"><span class="dot" style="background:#22c55e"></span>Dólar BCV</div><div class="rv">Bs. ${bs(BCV.usd)}</div><div class="rf">por 1 USD</div></div>
         <div class="card"><div class="rk"><span class="dot" style="background:#3b82f6"></span>Euro BCV</div><div class="rv">Bs. ${bs(BCV.eur)}</div><div class="rf">por 1 EUR</div></div>
-      </div>
-      <div class="card upd">
-        <div class="ur"><span>📅 Fecha valor del BCV</span><b>${fechaBCV(true)}</b></div>
-        <div class="ur"><span>🕒 Última actualización del precio</span><b>${cuandoFue(BCV.detectado || BCV.obtenido)}</b></div>
-        <div class="ur"><span>🔄 Última revisión</span><b>${cuandoFue(BCV.obtenido)}${bcvError ? ' · ⚠️ sin conexión' : ''}</b></div>
-        <div class="uf">${fuente}</div>
       </div>`
     : `<div class="card"><div class="empty"><div class="e">📡</div>${bcvError ? 'No hay conexión para buscar la tasa.<br>Conéctate a internet e intenta de nuevo.' : 'Buscando la tasa del BCV…'}</div></div>`;
 
   const usdtHtml = USDT
     ? `<div class="card usdt">
-        <div class="card-h"><h2>🪙 USDT · Binance P2P</h2><span class="m">${cuandoFue(USDT.obtenido)}${usdtError ? ' · ⚠️' : ''}</span></div>
+        <div class="card-h"><h2>🪙 USDT (P2P)</h2><span class="m">${cuandoFue(USDT.obtenido)}${usdtError ? ' · ⚠️' : ''}</span></div>
         <div class="u3">
           <div><span>Para comprar</span><b>Bs. ${bs(USDT.compra)}</b></div>
           <div><span>Para vender</span><b>Bs. ${bs(USDT.venta)}</b></div>
@@ -373,8 +366,21 @@ function vistaCalc() {
         ${BCV ? `<div class="uf">El USDT está ${bs(((USDT.promedio / BCV.usd) - 1) * 100)}% por encima del dólar BCV</div>` : ''}
       </div>`
     : esApp
-      ? `<div class="card usdt"><div class="uf" style="margin:0">🪙 USDT: ${usdtError ? 'no se pudo leer Binance P2P. Intenta actualizar.' : 'buscando precio…'}</div></div>`
-      : `<div class="card usdt"><div class="uf" style="margin:0">🪙 El precio del USDT (Binance P2P) está disponible en la app de Android.</div></div>`;
+      ? `<div class="card usdt"><div class="uf" style="margin:0">🪙 USDT: ${usdtError ? 'no se pudo obtener el precio. Intenta actualizar.' : 'buscando precio…'}</div></div>`
+      : `<div class="card usdt"><div class="uf" style="margin:0">🪙 El precio del USDT está disponible en la app de Android.</div></div>`;
+
+  // Información de la tasa: va al final, debajo de "Actualizar tasas"
+  const infoHtml = BCV
+    ? `<div class="card upd">
+        <div class="ur"><span>📅 Fecha valor del BCV</span><b>${fechaBCV(true)}</b></div>
+        <div class="ur"><span>🕒 Última actualización del precio</span><b>${cuandoFue(BCV.detectado || BCV.obtenido)}</b></div>
+        <div class="ur"><span>🔄 Última revisión</span><b>${cuandoFue(BCV.obtenido)}${bcvError ? ' · ⚠️ sin conexión' : ''}</b></div>
+        <a class="ig" href="${IG_BCV}" target="_blank" rel="noopener">
+          <span>¿Quieres confirmarlo? Consulta el Instagram del BCV aquí</span><b>@bcv.org.ve ›</b>
+        </a>
+      </div>`
+    : `<a class="card ig solo" href="${IG_BCV}" target="_blank" rel="noopener">
+        <span>Consulta la tasa en el Instagram del BCV</span><b>@bcv.org.ve ›</b></a>`;
 
   const d = DIVISAS[CALC.div];
   return `
@@ -393,6 +399,7 @@ function vistaCalc() {
       <div class="chips" style="margin-top:14px">${[1, 5, 10, 20, 50, 100].map(m => `<button class="chip" data-q="${m}">${d.s}${m}</button>`).join('')}<button class="chip" id="cClr">Borrar</button></div>
     </div>
     <button class="btn soft mt" data-act="bcvRefrescar">🔄 Actualizar tasas</button>
+    ${infoHtml}
   `;
 }
 
@@ -738,14 +745,12 @@ function vistaAjustes() {
       💡 <b style="color:var(--text)">Cómo funciona:</b> pon cuánto dinero tienes en la quincena, cuánto quieres ahorrar y lo que tienes que pagar.
       La app te dice cuánto te queda libre y <b>cuánto puedes gastar al día</b> hasta tu próximo cobro (el 15 y el último día de cada mes, contando hoy).<br><br>
       Si te entra dinero extra, usa <b>“Agregar capital”</b>. Los gastos <b>quincenales</b> se copian a cada quincena y los <b>mensuales</b> solo a la quincena con la que los pagas.
-      Al terminar la quincena, tócale a <i>“Terminar quincena”</i> y tu ahorro se suma a tu alcancía.
+      Al terminar la quincena, tócale a <i>“Terminar quincena”</i> y tu ahorro queda guardado.
     </div>
     <input type="file" id="fileImport" accept="application/json,.json" hidden>
-    <div class="card" style="font-size:13px;color:var(--muted);line-height:1.5">
-      💱 La tasa BCV se lee directo de <b style="color:var(--text)">bcv.org.ve</b>. Si esa página no responde se usa <b style="color:var(--text)">DolarApi Venezuela</b> como respaldo.
-      El precio del USDT es el promedio de los primeros anuncios de <b style="color:var(--text)">Binance P2P</b> (no es una tasa oficial).
-    </div>
-    <div class="foot">Mi Ahorro · v2.1</div>
+    <a class="card ig solo" href="${IG_BCV}" target="_blank" rel="noopener">
+      <span>💱 Consulta la tasa en el Instagram del BCV</span><b>@bcv.org.ve ›</b></a>
+    <div class="foot">Mi Ahorro · v2.2</div>
   `;
 }
 
