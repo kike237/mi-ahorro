@@ -209,36 +209,87 @@ function toast(msg) {
   toastT = setTimeout(() => t.classList.remove('show'), 2400);
 }
 
-/* ---------------- Tasa BCV ---------------- */
-// Fuente: DolarApi Venezuela (publica la tasa oficial del BCV, la misma de bcv.org.ve)
+/* ---------------- Tasas: BCV y USDT ---------------- */
+// BCV: en la app de Android se lee directo de bcv.org.ve (fuente oficial).
+//      Si falla, o en la versión web, se usa DolarApi Venezuela como respaldo.
+// USDT: promedio de los primeros 10 anuncios de Binance P2P (solo en la app de Android).
 
+const esApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const BCV_KEY = 'mi-ahorro-bcv';
-const BCV_URL = 'https://ve.dolarapi.com/v1/cotizaciones';
-let BCV = (() => { try { return JSON.parse(localStorage.getItem(BCV_KEY)) || null; } catch (e) { return null; } })();
-let bcvCargando = false, bcvError = false;
+const USDT_KEY = 'mi-ahorro-usdt';
+const BCV_OFICIAL = 'https://www.bcv.org.ve/';
+const BCV_RESPALDO = 'https://ve.dolarapi.com/v1/cotizaciones';
+const P2P_URL = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
+const leerLS = k => { try { return JSON.parse(localStorage.getItem(k)) || null; } catch (e) { return null; } };
+const guardarLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* nada */ } };
+
+let BCV = leerLS(BCV_KEY);
+let USDT = leerLS(USDT_KEY);
+let bcvCargando = false, bcvError = false, usdtError = false;
 
 const bs = n => new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
+const numVE = s => parseFloat(String(s).trim().replace(/\./g, '').replace(',', '.'));
+
+async function bcvDesdeOficial() {
+  const res = await fetch(BCV_OFICIAL, { cache: 'no-store' });
+  if (!res.ok) throw new Error(res.status);
+  const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+  const val = id => { const s = doc.querySelector(`#${id} strong`); return s ? numVE(s.textContent) : 0; };
+  const usd = val('dolar'), eur = val('euro');
+  const f = doc.querySelector('[property="dc:date"]');
+  if (!(usd > 0 && eur > 0)) throw new Error('sin datos');
+  return { usd, eur, fecha: f ? String(f.getAttribute('content')).slice(0, 10) : '', fuente: 'bcv' };
+}
+
+async function bcvDesdeRespaldo() {
+  const res = await fetch(BCV_RESPALDO, { cache: 'no-store' });
+  if (!res.ok) throw new Error(res.status);
+  const data = await res.json();
+  const of = m => data.find(x => x.moneda === m && x.fuente === 'oficial');
+  const usd = of('USD'), eur = of('EUR');
+  if (!usd || !eur) throw new Error('sin datos');
+  return { usd: usd.promedio, eur: eur.promedio, fecha: String(usd.fechaActualizacion || '').slice(0, 10), fuente: 'dolarapi' };
+}
+
+async function usdtDesdeBinance() {
+  const pedir = async tradeType => {
+    const res = await fetch(P2P_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset: 'USDT', fiat: 'VES', tradeType, page: 1, rows: 10, payTypes: [], publisherType: null }),
+    });
+    const j = await res.json();
+    const p = (j.data || []).map(x => +x.adv.price).filter(x => x > 0);
+    if (!p.length) throw new Error('sin anuncios');
+    return p.reduce((a, b) => a + b, 0) / p.length;
+  };
+  const [compra, venta] = await Promise.all([pedir('BUY'), pedir('SELL')]);
+  return { compra, venta, promedio: (compra + venta) / 2, obtenido: Date.now() };
+}
 
 async function actualizarBCV(forzar) {
   if (bcvCargando) return;
-  if (!forzar && BCV && Date.now() - BCV.obtenido < 60 * 60 * 1000) return; // máximo una vez por hora
+  if (!forzar && BCV && Date.now() - BCV.obtenido < 30 * 60 * 1000) return; // máximo cada 30 minutos
   bcvCargando = true;
-  try {
-    const res = await fetch(BCV_URL, { cache: 'no-store' });
-    if (!res.ok) throw new Error(res.status);
-    const data = await res.json();
-    const of = m => data.find(x => x.moneda === m && x.fuente === 'oficial');
-    const usd = of('USD'), eur = of('EUR');
-    if (!usd || !eur) throw new Error('sin datos');
-    BCV = {
-      usd: usd.promedio, eur: eur.promedio,
-      fecha: String(usd.fechaActualizacion || '').slice(0, 10), obtenido: Date.now(),
-    };
+
+  let nuevo = null;
+  if (esApp) { try { nuevo = await bcvDesdeOficial(); } catch (e) { /* probar respaldo */ } }
+  if (!nuevo) { try { nuevo = await bcvDesdeRespaldo(); } catch (e) { /* sin conexión */ } }
+
+  if (nuevo) {
+    const cambio = !BCV || BCV.usd !== nuevo.usd || BCV.eur !== nuevo.eur || BCV.fecha !== nuevo.fecha;
+    BCV = { ...nuevo, obtenido: Date.now(), detectado: cambio ? Date.now() : (BCV.detectado || BCV.obtenido) };
     bcvError = false;
-    try { localStorage.setItem(BCV_KEY, JSON.stringify(BCV)); } catch (e) { /* nada */ }
-  } catch (e) {
+    guardarLS(BCV_KEY, BCV);
+  } else {
     bcvError = true;
   }
+
+  if (esApp) {
+    try { USDT = await usdtDesdeBinance(); usdtError = false; guardarLS(USDT_KEY, USDT); }
+    catch (e) { usdtError = true; }
+  }
+
   bcvCargando = false;
   if ((tab === 'inicio' || tab === 'calc') && !$('#sheet').classList.contains('open')) render();
 }
@@ -247,6 +298,15 @@ function fechaBCV(larga) {
   if (!BCV || !BCV.fecha) return '';
   const f = parse(BCV.fecha);
   return larga ? `${DIAS[f.getDay()]} ${f.getDate()} de ${MESES[f.getMonth()]}` : `${DIAS[f.getDay()].slice(0, 3)} ${diaMes(f)}`;
+}
+// "hoy, 1:12 p. m." / "ayer, 4:05 p. m." / "lunes 9 nov, 4:05 p. m."
+function cuandoFue(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  const hora = d.toLocaleTimeString('es-VE', { hour: 'numeric', minute: '2-digit' });
+  const dias = dayDiff(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12), hoyD());
+  const dia = dias === 0 ? 'hoy' : dias === 1 ? 'ayer' : `${DIAS[d.getDay()]} ${diaMes(d)}`;
+  return `${dia}, ${hora}`;
 }
 
 function tarjetaBCV() {
@@ -267,35 +327,65 @@ function tarjetaBCV() {
 
 /* ---- Calculadora ---- */
 const CALC = { div: 'USD', ext: '', ves: '', ultimo: 'ext' };
-const tasaDe = d => (BCV ? (d === 'USD' ? BCV.usd : BCV.eur) : 0);
-const simb = d => (d === 'USD' ? '$' : '€');
+const DIVISAS = {
+  USD: { s: '$', n: 'Dólares', b: '🇺🇸 Dólar' },
+  EUR: { s: '€', n: 'Euros', b: '🇪🇺 Euro' },
+  USDT: { s: '₮', n: 'USDT', b: '🪙 USDT' },
+};
+const tasaDe = d => (d === 'USDT' ? (USDT ? USDT.promedio : 0) : BCV ? (d === 'USD' ? BCV.usd : BCV.eur) : 0);
+const simb = d => DIVISAS[d].s;
 const fmtIn = n => (n ? String(Math.round(n * 100) / 100) : '');
 
 function vistaCalc() {
-  const rates = BCV
+  if (CALC.div === 'USDT' && !USDT) CALC.div = 'USD';
+  const fuente = BCV && BCV.fuente === 'bcv'
+    ? '✅ Fuente: bcv.org.ve (oficial)'
+    : '↪️ Fuente: DolarApi Venezuela (respaldo, copia la tasa del BCV)';
+
+  const bcvHtml = BCV
     ? `<div class="rates">
         <div class="card"><div class="rk"><span class="dot" style="background:#22c55e"></span>Dólar BCV</div><div class="rv">Bs. ${bs(BCV.usd)}</div><div class="rf">por 1 USD</div></div>
         <div class="card"><div class="rk"><span class="dot" style="background:#3b82f6"></span>Euro BCV</div><div class="rv">Bs. ${bs(BCV.eur)}</div><div class="rf">por 1 EUR</div></div>
       </div>
-      <div class="soon" style="margin-top:8px">Fecha valor: ${fechaBCV(true)}${bcvError ? ' · ⚠️ sin conexión, última tasa guardada' : ''}</div>`
+      <div class="card upd">
+        <div class="ur"><span>📅 Fecha valor del BCV</span><b>${fechaBCV(true)}</b></div>
+        <div class="ur"><span>🕒 Última actualización del precio</span><b>${cuandoFue(BCV.detectado || BCV.obtenido)}</b></div>
+        <div class="ur"><span>🔄 Última revisión</span><b>${cuandoFue(BCV.obtenido)}${bcvError ? ' · ⚠️ sin conexión' : ''}</b></div>
+        <div class="uf">${fuente}</div>
+      </div>`
     : `<div class="card"><div class="empty"><div class="e">📡</div>${bcvError ? 'No hay conexión para buscar la tasa.<br>Conéctate a internet e intenta de nuevo.' : 'Buscando la tasa del BCV…'}</div></div>`;
 
+  const usdtHtml = USDT
+    ? `<div class="card usdt">
+        <div class="card-h"><h2>🪙 USDT · Binance P2P</h2><span class="m">${cuandoFue(USDT.obtenido)}${usdtError ? ' · ⚠️' : ''}</span></div>
+        <div class="u3">
+          <div><span>Para comprar</span><b>Bs. ${bs(USDT.compra)}</b></div>
+          <div><span>Para vender</span><b>Bs. ${bs(USDT.venta)}</b></div>
+          <div><span>Promedio</span><b class="pos">Bs. ${bs(USDT.promedio)}</b></div>
+        </div>
+        ${BCV ? `<div class="uf">El USDT está ${bs(((USDT.promedio / BCV.usd) - 1) * 100)}% por encima del dólar BCV</div>` : ''}
+      </div>`
+    : esApp
+      ? `<div class="card usdt"><div class="uf" style="margin:0">🪙 USDT: ${usdtError ? 'no se pudo leer Binance P2P. Intenta actualizar.' : 'buscando precio…'}</div></div>`
+      : `<div class="card usdt"><div class="uf" style="margin:0">🪙 El precio del USDT (Binance P2P) está disponible en la app de Android.</div></div>`;
+
+  const d = DIVISAS[CALC.div];
   return `
-    <header class="top"><div><h1>Calculadora</h1><div class="sub">Bolívares ↔ dólares y euros, tasa oficial BCV</div></div></header>
-    ${rates}
+    <header class="top"><div><h1>Calculadora</h1><div class="sub">Bolívares ↔ dólares, euros y USDT</div></div></header>
+    ${bcvHtml}
+    ${usdtHtml}
     <div class="card conv">
       <div class="seg" id="cDiv" style="margin-bottom:14px">
-        <button data-d="USD">🇺🇸 Dólares</button><button data-d="EUR">🇪🇺 Euros</button>
+        ${Object.entries(DIVISAS).map(([k, x]) => `<button data-d="${k}" ${k === 'USDT' && !USDT ? 'disabled style="opacity:.4"' : ''}>${x.b}</button>`).join('')}
       </div>
-      <div class="cf"><div class="cl"><span>${CALC.div === 'USD' ? 'Dólares' : 'Euros'}</span><span>${CALC.div}</span></div>
-        <div class="ci"><span>${simb(CALC.div)}</span><input id="cExt" inputmode="decimal" autocomplete="off" placeholder="0" value="${CALC.ext}"></div></div>
+      <div class="cf"><div class="cl"><span>${d.n}</span><span>${CALC.div === 'USDT' ? 'promedio P2P' : 'tasa BCV'}</span></div>
+        <div class="ci"><span>${d.s}</span><input id="cExt" inputmode="decimal" autocomplete="off" placeholder="0" value="${CALC.ext}"></div></div>
       <div class="swap" aria-hidden="true">⇅</div>
       <div class="cf"><div class="cl"><span>Bolívares</span><span>VES</span></div>
         <div class="ci"><span>Bs.</span><input id="cVes" inputmode="decimal" autocomplete="off" placeholder="0" value="${CALC.ves}"></div></div>
-      <div class="chips" style="margin-top:14px">${[1, 5, 10, 20, 50, 100].map(m => `<button class="chip" data-q="${m}">${simb(CALC.div)}${m}</button>`).join('')}<button class="chip" id="cClr">Borrar</button></div>
+      <div class="chips" style="margin-top:14px">${[1, 5, 10, 20, 50, 100].map(m => `<button class="chip" data-q="${m}">${d.s}${m}</button>`).join('')}<button class="chip" id="cClr">Borrar</button></div>
     </div>
-    <button class="btn soft mt" data-act="bcvRefrescar">🔄 Actualizar tasa</button>
-    <div class="soon">💡 Pronto: precio del USDT</div>
+    <button class="btn soft mt" data-act="bcvRefrescar">🔄 Actualizar tasas</button>
   `;
 }
 
@@ -304,20 +394,23 @@ function montarCalc() {
   const ext = $('#cExt', v), ves = $('#cVes', v);
   if (!ext) return;
   v.querySelectorAll('#cDiv button').forEach(b => b.classList.toggle('on', b.dataset.d === CALC.div));
-  const desdeExt = () => { CALC.ext = ext.value; CALC.ultimo = 'ext'; CALC.ves = BCV ? fmtIn(num(ext.value) * tasaDe(CALC.div)) : ''; ves.value = CALC.ves; };
-  const desdeVes = () => { CALC.ves = ves.value; CALC.ultimo = 'ves'; CALC.ext = BCV ? fmtIn(num(ves.value) / tasaDe(CALC.div)) : ''; ext.value = CALC.ext; };
+  const t = () => tasaDe(CALC.div);
+  const desdeExt = () => { CALC.ext = ext.value; CALC.ultimo = 'ext'; CALC.ves = t() ? fmtIn(num(ext.value) * t()) : ''; ves.value = CALC.ves; };
+  const desdeVes = () => { CALC.ves = ves.value; CALC.ultimo = 'ves'; CALC.ext = t() ? fmtIn(num(ves.value) / t()) : ''; ext.value = CALC.ext; };
   ext.oninput = desdeExt;
   ves.oninput = desdeVes;
   v.querySelectorAll('#cDiv button').forEach(b => b.onclick = () => {
+    if (b.disabled) return;
     CALC.div = b.dataset.d;
     // recalcula a partir del último campo que escribiste
-    if (CALC.ultimo === 'ves') { CALC.ext = BCV ? fmtIn(num(CALC.ves) / tasaDe(CALC.div)) : ''; }
-    else { CALC.ves = BCV ? fmtIn(num(CALC.ext) * tasaDe(CALC.div)) : ''; }
+    if (CALC.ultimo === 'ves') { CALC.ext = t() ? fmtIn(num(CALC.ves) / t()) : ''; }
+    else { CALC.ves = t() ? fmtIn(num(CALC.ext) * t()) : ''; }
     render();
   });
   v.querySelectorAll('[data-q]').forEach(c => c.onclick = () => { ext.value = c.dataset.q; desdeExt(); });
   $('#cClr', v).onclick = () => { CALC.ext = CALC.ves = ''; ext.value = ves.value = ''; ext.focus(); };
 }
+
 
 /* ---------------- Vistas ---------------- */
 
@@ -1063,8 +1156,6 @@ document.addEventListener('visibilitychange', () => {
 render();
 actualizarBCV(false);
 
-// En la app de Android (Capacitor) los archivos ya vienen dentro del APK: no hace falta el service worker
-const esApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 if ('serviceWorker' in navigator && location.protocol !== 'file:' && !esApp) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
