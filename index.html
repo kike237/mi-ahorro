@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Mi Ahorro</title>
+<meta name="theme-color" content="#047857">
+<meta name="description" content="Planea tu quincena: ahorro, gastos y lo que te queda libre.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <main id="view"></main>
+  <nav class="tabbar">
+    <button data-tab="quincena" class="active"><span class="ti">🗓️</span><span>Quincena</span></button>
+    <button data-tab="ahorros"><span class="ti">🐷</span><span>Ahorros</span></button>
+    <button data-tab="ajustes"><span class="ti">⚙️</span><span>Ajustes</span></button>
+  </nav>
+</div>
+
+<div id="scrim" class="scrim"></div>
+<section id="sheet" class="sheet" role="dialog" aria-modal="true">
+  <div class="grab"></div>
+  <div id="sheetBody"></div>
+</section>
+<div id="toast" class="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
