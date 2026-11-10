@@ -386,3 +386,8 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .ig b { color: var(--primary); white-space: nowrap; font-size: 13.5px; }
 .card.ig.solo { padding: 14px 16px; margin-top: 14px; }
 .upd .ig { padding: 12px 0 8px; }
+
+/* Aviso: empezó la quincena */
+.cobro-new { margin-bottom: 14px; border: 1px solid rgba(52, 211, 153, .35); background: linear-gradient(135deg, rgba(52, 211, 153, .14), rgba(59, 130, 246, .10)); }
+.cobro-new .cn-t { font-size: 17px; font-weight: 700; }
+.cobro-new .cn-s { font-size: 14px; color: #c9d4ea; margin-top: 4px; line-height: 1.4; }

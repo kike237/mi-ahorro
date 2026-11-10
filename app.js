@@ -62,19 +62,17 @@ function cobroPara(d) {
 }
 const tipoCobro = d => (d.getDate() === 15 ? '15' : 'fin');
 
-function siguienteCobro(prev) {
-  let c = cobroPara(hoyD());
-  if (prev && prev.cobro && c <= parse(prev.cobro)) c = cobroDespues(parse(prev.cobro));
-  return c;
-}
+// La quincena en curso es la del último día de cobro (el 15 o fin de mes) que ya llegó
+const periodoActual = () => cobroHasta(hoyD());
 
 /* ---------------- Estado ---------------- */
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const freqDe = g => g.freq || (g.fijo ? 'quincenal' : 'una');
 
-function nuevaQuincena(prev) {
-  const cobro = siguienteCobro(prev);
+// prev: la quincena anterior (para copiar gastos fijos y ajustes); cobro: Date del día de cobro que la inicia
+function nuevaQuincena(prev, cobro) {
+  cobro = cobro || periodoActual();
   const tipo = tipoCobro(cobro);
   const gastos = [], enEspera = [];
   if (prev) {
@@ -87,9 +85,11 @@ function nuevaQuincena(prev) {
   }
   return {
     id: uid(),
-    inicio: today(),
+    inicio: ymd(cobro),
     cobro: ymd(cobro),
-    ingreso: prev ? prev.ingreso : 0,
+    // "ingreso" es el dinero que tienes ahora; al empezar, lo que te quedó (sin el ahorro apartado)
+    ingreso: prev ? Math.max(0, Math.round((calc(prev).saldo - calc(prev).ahorro) * 100) / 100) : 0,
+    nuevoCobro: !!prev,
     extras: [],
     ahorroModo: prev ? prev.ahorroModo : 'monto',
     ahorroValor: prev ? prev.ahorroValor : 0,
@@ -100,7 +100,7 @@ function nuevaQuincena(prev) {
 
 function estadoInicial() {
   return {
-    v: 3, moneda: 'USD', meta: { nombre: '', monto: 0 }, actual: nuevaQuincena(null), historial: [], movs: [],
+    v: 4, moneda: 'USD', meta: { nombre: '', monto: 0 }, actual: nuevaQuincena(null), historial: [], movs: [],
     perfil: { nombre: '', preguntado: false },
     notif: { bcv: true, diario: true, hora: '20:00', cobro: true },
   };
@@ -120,8 +120,35 @@ function migrar(s) {
     if (!g.freq) g.freq = freqDe(g);
     if (!CAT[g.cat]) g.cat = 'otro';
   }
-  s.v = 3;
+  if ((s.v || 1) < 4) {
+    // Antes "ingreso" era el total de la quincena; ahora es el dinero que tienes.
+    // Los gastos ya pagados salen de ese dinero (así lo libre queda igual).
+    q.ingreso = (q.ingreso || 0) - q.gastos.filter(g => g.pagado).reduce((a, g) => a + (g.monto || 0), 0);
+    // Si se había terminado la quincena antes de tiempo, se vuelve a la del calendario
+    const per = periodoActual();
+    if (parse(q.cobro) > per) q.cobro = ymd(per);
+  }
+  s.v = 4;
   return s;
+}
+
+// Si ya llegó un día de cobro nuevo, la quincena cambia sola: la anterior se guarda en el historial
+function revisarCobro() {
+  const per = periodoActual();
+  let cambio = false;
+  while (parse(S.actual.cobro) < per) {
+    const q = S.actual, c = calc(q);
+    const sig = cobroDespues(parse(q.cobro));
+    S.historial.push({
+      id: q.id, inicio: q.inicio, fin: ymd(sig), cobro: q.cobro,
+      ingreso: c.ingreso, extra: c.extra, gastos: c.gastos, ahorroPlan: c.ahorro, ahorroReal: c.ahorro,
+      detalle: q.gastos.map(g => ({ nombre: g.nombre, monto: g.monto, cat: g.cat, pagado: g.pagado })),
+    });
+    S.actual = nuevaQuincena(q, sig);
+    cambio = true;
+  }
+  if (cambio) guardar();
+  return cambio;
 }
 
 function cargar() {
@@ -136,6 +163,7 @@ function cargar() {
 }
 
 let S = cargar();
+revisarCobro();
 const TABS = ['inicio', 'calc', 'ajustes'];
 let tab = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'inicio';
 
@@ -185,21 +213,26 @@ function fechaCorta(iso) {
 const diaMes = d => `${d.getDate()} ${MESES[d.getMonth()].slice(0, 3)}`;
 const nombreMitad = m => (m === 'fin' ? 'la de fin de mes' : 'la del 15');
 
+// saldo  = el dinero que tienes ahora (lo que pagas ya salió de aquí)
+// ingreso = saldo + lo ya pagado (el total con el que contabas en la quincena)
+// libre  = saldo − ahorro − lo que falta por pagar
 function calc(q) {
   const base = q.ingreso || 0;
   const extra = (q.extras || []).reduce((a, x) => a + (x.monto || 0), 0);
-  const ingreso = base + extra;
-  const ahorro = q.ahorroModo === 'pct' ? Math.round(ingreso * (q.ahorroValor || 0)) / 100 : (q.ahorroValor || 0);
+  const saldo = base + extra;
   const gastos = q.gastos.reduce((a, g) => a + (g.monto || 0), 0);
   const pagado = q.gastos.filter(g => g.pagado).reduce((a, g) => a + (g.monto || 0), 0);
-  const libre = ingreso - ahorro - gastos;
-  return { base, extra, ingreso, ahorro, gastos, pagado, pendiente: gastos - pagado, libre };
+  const pendiente = gastos - pagado;
+  const ingreso = saldo + pagado;
+  const ahorro = q.ahorroModo === 'pct' ? Math.round(ingreso * (q.ahorroValor || 0)) / 100 : (q.ahorroValor || 0);
+  const libre = saldo - ahorro - pendiente;
+  return { base, extra, saldo, ingreso, ahorro, gastos, pagado, pendiente, libre };
 }
 
-// Días que faltan para cobrar, contando hoy y el día de cobro
-function diasParaCobrar(q) {
+// Días que faltan para el próximo cobro (15 o fin de mes), contando hoy y el día de cobro
+function diasParaCobrar() {
   const hoy = hoyD();
-  const hasta = cobroDespues(parse(q.cobro));
+  const hasta = cobroDespues(hoy);
   return { hasta, dias: dayDiff(hoy, hasta) + 1 };
 }
 
@@ -532,15 +565,9 @@ function metaYResumen(c) {
 }
 
 function tarjetaDiaria(q, c) {
-  const { hasta, dias } = diasParaCobrar(q);
+  const { hasta, dias } = diasParaCobrar();
   const cuando = `${DIAS[hasta.getDay()]} ${diaMes(hasta)}`;
-
-  if (dias < 1) {
-    return `<div class="card daily late">
-      <div class="d-msg">⏰ Tu día de cobro fue el <b>${cuando}</b>. Termina esta quincena para empezar la nueva.</div>
-      <button class="btn mt" data-act="cerrar">Terminar quincena</button></div>`;
-  }
-  if (!c.ingreso) return '';
+  if (!c.saldo && !c.pendiente) return '';
 
   const porDia = c.libre > 0 ? Math.floor((c.libre / dias) * 100) / 100 : 0;
   const pd = money(porDia, { dec: porDia % 1 !== 0 });
@@ -582,7 +609,18 @@ function filaGasto(g, enEspera) {
 function vistaInicio() {
   const q = S.actual;
   const c = calc(q);
-  const hasta = cobroDespues(parse(q.cobro));
+  const { hasta } = diasParaCobrar();
+
+  const avisoCobro = q.nuevoCobro
+    ? `<div class="card cobro-new">
+        <div class="cn-t">🎉 ¡Empezó tu ${etiquetaCobro(q.cobro).toLowerCase()}!</div>
+        <div class="cn-s">Agrega lo que cobraste para recalcular cuánto puedes gastar al día.</div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn" data-act="cobre">＋ Agregar lo que cobré</button>
+          <button class="btn soft" data-act="cobroOk" style="flex:0 0 auto;width:auto;padding:15px 18px">Listo</button>
+        </div>
+      </div>`
+    : '';
 
   const gastosHtml = q.gastos.length
     ? `<div class="list">${q.gastos.map(g => filaGasto(g, false)).join('')}</div>`
@@ -608,20 +646,21 @@ function vistaInicio() {
       </button>
     </header>
 
+    ${avisoCobro}
     ${tarjetaBCV()}
 
     <section class="hero">
-      <div class="label">${etiquetaCobro(q.cobro)}</div>
-      <div class="big" data-count="${c.ingreso}">${money(c.ingreso)}</div>
+      <div class="label">Tu dinero ahora · ${etiquetaCobro(q.cobro).toLowerCase()}</div>
+      <div class="big" data-count="${c.saldo}">${money(c.saldo)}</div>
       ${c.extra ? `<div class="hero-note">Incluye ${money(c.extra)} de capital agregado</div>` : ''}
       ${vsQ ? `<div class="vs-row">${vsQ}</div>` : ''}
       <div class="hero-btns">
-        <button class="pill" data-act="editIngreso">✏️ ${c.ingreso ? 'Cambiar' : 'Poner cuánto tengo'}</button>
+        <button class="pill" data-act="editIngreso">✏️ ${c.saldo || c.pagado ? 'Actualizar' : 'Poner cuánto tengo'}</button>
         <button class="pill green" data-act="capital">＋ Agregar capital</button>
       </div>
       <div class="hero-split">
         <button data-act="editAhorro" style="text-align:left"><div class="k"><span class="dot" style="background:#3b82f6"></span>Ahorro</div><div class="v">${money(c.ahorro)}</div></button>
-        <div><div class="k"><span class="dot" style="background:#f87171"></span>Gastos</div><div class="v">${money(c.gastos)}</div></div>
+        <div><div class="k"><span class="dot" style="background:#f87171"></span>Por pagar</div><div class="v">${money(c.pendiente)}</div></div>
         <div><div class="k"><span class="dot" style="background:#34d399"></span>Libre</div><div class="v ${c.libre < 0 ? 'neg' : ''}">${money(c.libre)}</div></div>
       </div>
     </section>
@@ -639,8 +678,6 @@ function vistaInicio() {
     </div>
     ${gastosHtml}
     ${esperaHtml}
-
-    <button class="btn soft mt" data-act="cerrar">✅ Terminar quincena y guardar ahorro</button>
 
     <button class="fab" data-act="nuevoGasto" aria-label="Agregar gasto">+</button>
   `;
@@ -742,15 +779,16 @@ function vistaAjustes() {
       <button class="row" data-act="borrarTodo"><span class="ico">🗑️</span><span class="main"><div class="t" style="color:var(--danger)">Borrar todo</div><div class="s">Empezar de cero</div></span><span>›</span></button>
     </div>
     <div class="card" style="font-size:14px;color:var(--muted);line-height:1.55">
-      💡 <b style="color:var(--text)">Cómo funciona:</b> pon cuánto dinero tienes en la quincena, cuánto quieres ahorrar y lo que tienes que pagar.
+      💡 <b style="color:var(--text)">Cómo funciona:</b> pon cuánto dinero tienes ahora, cuánto quieres ahorrar y lo que tienes que pagar.
       La app te dice cuánto te queda libre y <b>cuánto puedes gastar al día</b> hasta tu próximo cobro (el 15 y el último día de cada mes, contando hoy).<br><br>
       Si te entra dinero extra, usa <b>“Agregar capital”</b>. Los gastos <b>quincenales</b> se copian a cada quincena y los <b>mensuales</b> solo a la quincena con la que los pagas.
-      Al terminar la quincena, tócale a <i>“Terminar quincena”</i> y tu ahorro queda guardado.
+      Cuando marcas un gasto como pagado, se descuenta solo de tu dinero. Actualiza tu dinero cuando quieras.
+      Al llegar el día de cobro, la quincena nueva empieza sola y la anterior queda guardada con su ahorro.
     </div>
     <input type="file" id="fileImport" accept="application/json,.json" hidden>
     <a class="card ig solo" href="${IG_BCV}" target="_blank" rel="noopener">
       <span>💱 Consulta la tasa en el Instagram del BCV</span><b>@bcv.org.ve ›</b></a>
-    <div class="foot">Mi Ahorro · v2.2</div>
+    <div class="foot">Mi Ahorro · v2.3</div>
   `;
 }
 
@@ -831,21 +869,27 @@ function focusLater(el) { setTimeout(() => { el.focus(); el.select && el.select(
 function sheetIngreso() {
   const c = calc(S.actual);
   openSheet(`
-    <h3>¿Cuánto dinero tienes esta quincena?</h3>
-    <p class="hint">Tu sueldo o el total con el que cuentas.${c.extra ? ` Aparte llevas ${money(c.extra)} de capital agregado.` : ''}</p>
-    ${moneyField('fIngreso', S.actual.ingreso, 'Total')}
+    <h3>¿Cuánto dinero tienes ahora?</h3>
+    <p class="hint">Lo que tienes en este momento (efectivo, banco, todo junto). Actualízalo cuando quieras: la app recalcula cuánto puedes gastar al día.</p>
+    ${moneyField('fIngreso', Math.round(c.saldo * 100) / 100, 'Tu dinero ahora')}
     <button class="btn mt" id="ok">Guardar</button>`,
     b => {
       const inp = $('#fIngreso', b);
       focusLater(inp);
-      const save = () => { S.actual.ingreso = num(inp.value); guardar(); closeSheet(); render(); };
+      const save = () => {
+        // el número que escribes es el dinero real: incluye el capital que habías agregado
+        S.actual.ingreso = num(inp.value);
+        S.actual.extras = [];
+        S.actual.nuevoCobro = false;
+        guardar(); closeSheet(); render(); toast('Dinero actualizado');
+      };
       $('#ok', b).onclick = save;
       inp.onkeydown = e => { if (e.key === 'Enter') save(); };
     });
 }
 
 /* ---- Agregar capital ---- */
-function sheetCapital() {
+function sheetCapital(esCobro) {
   const q = S.actual;
   const listaExtras = () => q.extras.length
     ? `<div class="sec-h"><h2 style="font-size:15px">Agregado esta quincena</h2></div>
@@ -856,12 +900,12 @@ function sheetCapital() {
          <button class="check" data-del="${x.id}" aria-label="Quitar" style="color:var(--muted)">✕</button></div>`).join('')}</div>`
     : '';
   openSheet(`
-    <h3>Agregar capital</h3>
-    <p class="hint">Dinero extra que te entró en esta quincena. Se suma a lo que tienes para gastar y ahorrar.</p>
+    <h3>${esCobro ? '¿Cuánto cobraste?' : 'Agregar capital'}</h3>
+    <p class="hint">${esCobro ? 'Se suma a lo que te quedó de la quincena pasada.' : 'Dinero extra que te entró en esta quincena. Se suma a lo que tienes para gastar y ahorrar.'}</p>
     ${moneyField('fCap', '', 'Cantidad')}
     ${chipsSuma('capChips', CAPITAL_RAPIDO)}
     <div class="field"><label for="fCapN">Nota (opcional)</label>
-      <input class="input" id="fCapN" maxlength="40" placeholder="Ej. Trabajo extra, venta…"></div>
+      <input class="input" id="fCapN" maxlength="40" placeholder="Ej. Trabajo extra, venta…" value="${esCobro ? 'Cobro de quincena' : ''}"></div>
     <button class="btn mt" id="ok">Agregar a la quincena</button>
     <div id="extrasBox">${listaExtras()}</div>`,
     b => {
@@ -871,6 +915,7 @@ function sheetCapital() {
         const v = num(inp.value);
         if (v <= 0) { toast('Pon una cantidad'); return; }
         q.extras.push({ id: uid(), monto: v, nota: $('#fCapN', b).value.trim(), fecha: today() });
+        q.nuevoCobro = false;
         guardar(); closeSheet(); render();
         toast(`+${money(v)} a tu quincena 💵`);
       };
@@ -902,7 +947,7 @@ function sheetAhorro() {
       const upd = () => {
         const v = num($('#fAh', b).value);
         const ah = modo === 'pct' ? (base.ingreso * v) / 100 : v;
-        const libre = base.ingreso - ah - base.gastos;
+        const libre = base.saldo - ah - base.pendiente;
         $('#prev', b).innerHTML = base.ingreso
           ? `Ahorras <b>${money(ah)}</b> · te quedan libres <b class="${libre < 0 ? 'neg' : ''}">${money(libre)}</b> después de gastos.`
           : 'Primero pon cuánto dinero tienes en la quincena.';
@@ -995,61 +1040,26 @@ function sheetGasto(id) {
           fijo: freq !== 'una', mitad: freq === 'mensual' ? mitad : undefined,
         };
         const obj = g || { id: uid(), pagado: false };
+        // si ya estaba pagado y cambió el monto, la diferencia sale (o vuelve) a tu dinero
+        if (obj.pagado) q.ingreso = (q.ingreso || 0) - (monto - (obj.monto || 0));
         Object.assign(obj, datos);
         const espera = freq === 'mensual' && mitad !== tipoActual;
         const enGastos = q.gastos.includes(obj);
         const enEspera = q.enEspera.includes(obj);
-        if (espera && !enEspera) { q.gastos = q.gastos.filter(x => x !== obj); obj.pagado = false; q.enEspera.push(obj); }
+        if (espera && !enEspera) {
+          q.gastos = q.gastos.filter(x => x !== obj);
+          if (obj.pagado) q.ingreso += obj.monto; // deja de contar como pagado en esta quincena
+          obj.pagado = false; q.enEspera.push(obj);
+        }
         if (!espera && !enGastos) { q.enEspera = q.enEspera.filter(x => x !== obj); q.gastos.push(obj); }
         guardar(); closeSheet(); render();
         toast(espera ? `Guardado para ${nombreMitad(mitad)}` : g ? 'Gasto actualizado' : 'Gasto agregado');
       };
       if (g) $('#del', b).onclick = () => {
+        if (g.pagado && q.gastos.includes(g)) q.ingreso = (q.ingreso || 0) + (g.monto || 0); // se deshace el pago
         q.gastos = q.gastos.filter(x => x.id !== g.id);
         q.enEspera = q.enEspera.filter(x => x.id !== g.id);
         guardar(); closeSheet(); render(); toast('Gasto eliminado');
-      };
-    });
-}
-
-/* ---- Cerrar quincena ---- */
-function sheetCerrar() {
-  const q = S.actual;
-  const c = calc(q);
-  const sig = siguienteCobro(q);
-  const tipoSig = tipoCobro(sig);
-  const recur = [...q.gastos.filter(g => freqDe(g) !== 'una'), ...q.enEspera]
-    .filter(g => freqDe(g) !== 'mensual' || (g.mitad || '15') === tipoSig).length;
-  openSheet(`
-    <h3>Terminar quincena</h3>
-    <p class="hint">${etiquetaCobro(q.cobro)}</p>
-    <div class="summary">
-      <div class="sr"><span>Dinero</span><b>${money(c.ingreso)}</b></div>
-      <div class="sr"><span>Gastos</span><b>${money(c.gastos)}</b></div>
-      <div class="sr"><span>Ahorro planeado</span><b class="pos">${money(c.ahorro)}</b></div>
-      <div class="sr"><span>Sobró libre</span><b>${money(c.libre)}</b></div>
-    </div>
-    ${moneyField('fReal', c.ahorro, '¿Cuánto ahorraste de verdad?')}
-    <div class="chips" style="margin-top:10px">
-      <button class="chip" data-v="${c.ahorro}">Lo planeado</button>
-      ${c.libre > 0 ? `<button class="chip" data-v="${c.ahorro + c.libre}">Planeado + lo que sobró</button>` : ''}
-    </div>
-    <p class="hint" style="margin-top:14px">Empezará la <b>${etiquetaCobro(ymd(sig)).toLowerCase()}</b> con ${money(c.base)} y el mismo ahorro${recur ? `, más ${recur} gasto${recur > 1 ? 's' : ''} que se repite${recur > 1 ? 'n' : ''}` : ''}. Lo puedes cambiar después.</p>
-    <button class="btn" id="ok">Guardar y empezar nueva</button>
-    <button class="btn ghost" id="cancel" style="margin-top:6px">Cancelar</button>`,
-    b => {
-      b.querySelectorAll('.chip').forEach(ch => ch.onclick = () => { $('#fReal', b).value = ch.dataset.v; });
-      $('#cancel', b).onclick = () => closeSheet();
-      $('#ok', b).onclick = () => {
-        const real = num($('#fReal', b).value);
-        S.historial.push({
-          id: q.id, inicio: q.inicio, fin: today(), cobro: q.cobro,
-          ingreso: c.ingreso, extra: c.extra, gastos: c.gastos, ahorroPlan: c.ahorro, ahorroReal: real,
-          detalle: q.gastos.map(g => ({ nombre: g.nombre, monto: g.monto, cat: g.cat, pagado: g.pagado })),
-        });
-        S.actual = nuevaQuincena(q);
-        guardar(); closeSheet(); render();
-        toast(`¡${money(real)} a tu alcancía! 🐷`);
       };
     });
 }
@@ -1331,15 +1341,17 @@ $('#view').addEventListener('click', async e => {
     case 'togglePago': {
       const g = S.actual.gastos.find(x => x.id === id);
       if (g) {
-        g.pagado = !g.pagado; guardar(); render(false);
+        g.pagado = !g.pagado;
+        // lo que pagas sale de tu dinero (y vuelve si lo desmarcas)
+        S.actual.ingreso = Math.round(((S.actual.ingreso || 0) + (g.pagado ? -1 : 1) * (g.monto || 0)) * 100) / 100;
+        guardar(); render(false);
         const ch = $(`.check[data-id="${id}"]`);
         if (ch && g.pagado) ch.classList.add('pop');
       }
       return;
     }
-    case 'cerrar':
-      if (!S.actual.ingreso && !S.actual.gastos.length && !S.actual.extras.length) return toast('Primero llena tu quincena');
-      return sheetCerrar();
+    case 'cobre': return sheetCapital(true);
+    case 'cobroOk': S.actual.nuevoCobro = false; guardar(); return render();
     case 'verQuincena': return sheetVerQuincena(id);
     case 'verMov': return sheetVerMov(id);
     case 'editMeta': return sheetMeta();
@@ -1358,7 +1370,8 @@ $('#view').addEventListener('click', async e => {
 // Si la app queda abierta de un día para otro, actualiza los días que faltan
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
-  if (!$('#sheet').classList.contains('open')) render();
+  const cambio = revisarCobro();
+  if (cambio || !$('#sheet').classList.contains('open')) { if (cambio) closeSheet(); render(); }
   actualizarBCV(false);
 });
 
