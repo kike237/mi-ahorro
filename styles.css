@@ -34,7 +34,7 @@ button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; padding: 0; }
 
 #app { max-width: 560px; margin: 0 auto; min-height: 100%; }
-#view { padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 110px); }
+#view { padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 110px + var(--ad-h, 0px)); }
 
 /* ---------- Header ---------- */
 .top { display: flex; align-items: center; justify-content: space-between; margin: 2px 2px 16px; gap: 12px; }
@@ -204,7 +204,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .mt { margin-top: 18px; }
 
 .fab {
-  position: fixed; right: max(18px, calc(50% - 262px)); bottom: calc(env(safe-area-inset-bottom) + 84px);
+  position: fixed; right: max(18px, calc(50% - 262px)); bottom: calc(env(safe-area-inset-bottom) + 84px + var(--ad-h, 0px)); transition: bottom .25s;
   width: 58px; height: 58px; border-radius: 20px; background: var(--primary-2); color: #04261b;
   font-size: 30px; box-shadow: 0 8px 24px rgba(16, 185, 129, .35); display: grid; place-items: center; z-index: 5;
 }
@@ -297,7 +297,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 
 /* ---------- Toast ---------- */
 .toast {
-  position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 96px); transform: translate(-50%, 20px);
+  position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 96px + var(--ad-h, 0px)); transform: translate(-50%, 20px);
   background: #e8eefb; color: #0a1020; padding: 11px 18px; border-radius: 14px; font-size: 14px; font-weight: 500;
   opacity: 0; pointer-events: none; transition: .25s; z-index: 30; max-width: calc(100% - 32px); text-align: center;
 }
@@ -391,3 +391,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .cobro-new { margin-bottom: 14px; border: 1px solid rgba(52, 211, 153, .35); background: linear-gradient(135deg, rgba(52, 211, 153, .14), rgba(59, 130, 246, .10)); }
 .cobro-new .cn-t { font-size: 17px; font-weight: 700; }
 .cobro-new .cn-s { font-size: 14px; color: #c9d4ea; margin-top: 4px; line-height: 1.4; }
+
+/* Anuncios */
+.ads-card .ads-t { font-size: 16px; font-weight: 700; }
+.ads-card .ads-s { font-size: 14px; color: var(--muted); margin-top: 4px; line-height: 1.45; }

@@ -778,6 +778,7 @@ function vistaAjustes() {
       <button class="row" data-act="importar"><span class="ico">📥</span><span class="main"><div class="t">Cargar respaldo</div><div class="s">Recupera tus datos desde un archivo</div></span><span>›</span></button>
       <button class="row" data-act="borrarTodo"><span class="ico">🗑️</span><span class="main"><div class="t" style="color:var(--danger)">Borrar todo</div><div class="s">Empezar de cero</div></span><span>›</span></button>
     </div>
+    ${typeof ADS !== 'undefined' ? ADS.tarjetaAjustes() : ''}
     <div class="card" style="font-size:14px;color:var(--muted);line-height:1.55">
       💡 <b style="color:var(--text)">Cómo funciona:</b> pon cuánto dinero tienes ahora, cuánto quieres ahorrar y lo que tienes que pagar.
       La app te dice cuánto te queda libre y <b>cuánto puedes gastar al día</b> hasta tu próximo cobro (el 15 y el último día de cada mes, contando hoy).<br><br>
@@ -816,6 +817,7 @@ function render(animar) {
   v.innerHTML = tab === 'inicio' ? vistaInicio() : tab === 'calc' ? vistaCalc() : tab === 'ahorros' ? vistaAhorros() : vistaAjustes();
   if (tab === 'calc') montarCalc();
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  if (typeof ADS !== 'undefined') ADS.sync();
   v.classList.remove('enter');
   if (animar && !sinMovimiento) {
     [...v.children].forEach((el, i) => el.style.setProperty('--i', Math.min(i, 9)));
@@ -834,12 +836,14 @@ function openSheet(html, mount) {
   $('#sheet').scrollTop = 0;
   if (mount) mount($('#sheetBody'));
   history.pushState({ sheet: true }, '');
+  if (typeof ADS !== 'undefined') ADS.sync();
 }
 function closeSheet(fromPop) {
   if (!$('#sheet').classList.contains('open')) return;
   $('#scrim').classList.remove('open');
   $('#sheet').classList.remove('open');
   document.activeElement && document.activeElement.blur();
+  if (typeof ADS !== 'undefined') ADS.sync();
   if (!fromPop && history.state && history.state.sheet) history.back();
 }
 window.addEventListener('popstate', () => closeSheet(true));
@@ -1054,6 +1058,7 @@ function sheetGasto(id) {
         if (!espera && !enGastos) { q.enEspera = q.enEspera.filter(x => x !== obj); q.gastos.push(obj); }
         guardar(); closeSheet(); render();
         toast(espera ? `Guardado para ${nombreMitad(mitad)}` : g ? 'Gasto actualizado' : 'Gasto agregado');
+        if (!g && typeof ADS !== 'undefined') ADS.trasAccion();
       };
       if (g) $('#del', b).onclick = () => {
         if (g.pagado && q.gastos.includes(g)) q.ingreso = (q.ingreso || 0) + (g.monto || 0); // se deshace el pago
@@ -1351,6 +1356,8 @@ $('#view').addEventListener('click', async e => {
       return;
     }
     case 'cobre': return sheetCapital(true);
+    case 'adsPremio': return ADS.verPremio();
+    case 'adsPrivacidad': return ADS.privacidadForm();
     case 'cobroOk': S.actual.nuevoCobro = false; guardar(); return render();
     case 'verQuincena': return sheetVerQuincena(id);
     case 'verMov': return sheetVerMov(id);
